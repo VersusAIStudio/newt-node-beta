@@ -1,8 +1,8 @@
-import { creativeImageDefaultModel, storyboardImageModelOptions } from "./modelOptions.js";
+import { storyboardImageDefaultModel, storyboardImageModelOptions } from "./modelOptions.js";
 import { isOpenAiImage25Model, openAiImage25KreaSelection } from "./openAiImage25.js";
 
 export function normalizeStoryboardImageModel(value) {
-  return storyboardImageModelOptions.includes(value) ? value : creativeImageDefaultModel;
+  return storyboardImageModelOptions.includes(value) ? value : storyboardImageDefaultModel;
 }
 
 export function storyboardImageSettings(data = {}, provider = "fal") {

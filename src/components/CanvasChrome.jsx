@@ -1,5 +1,5 @@
 import React from "react";
-import { Hand, Play, Plus, Save } from "lucide-react";
+import { Grid2X2, Hand, Magnet, Play, Plus, Save } from "lucide-react";
 import { normalizeRect } from "../nodeGeometry.js";
 
 export const EdgePath = React.memo(function EdgePath({ edgeId, from, to, color, draft, selected, active, inactive, onSelect }) {
@@ -37,16 +37,19 @@ export const SelectionMarquee = React.memo(function SelectionMarquee({ start, cu
   );
 });
 
-export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onSavePreset, onMoveStart }) {
+export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onSavePreset, onMoveStart, onArrange }) {
   const x = viewport.x + (bounds.left + bounds.width / 2) * viewport.scale;
   const y = viewport.y + bounds.top * viewport.scale - 54;
 
   return (
-    <div className="selection-action-bar" style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
+    <div className="selection-action-bar" style={{ left: `clamp(min(220px, 50%), ${x}px, max(calc(100% - 220px), 50%))`, top: `clamp(10px, ${y}px, calc(100% - 52px))` }} onPointerDown={(event) => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
       <button type="button" className="selection-move-handle" onPointerDown={onMoveStart} title="Move selected nodes" aria-label="Move selected nodes">
         <Hand size={19} />
       </button>
       <span className="selection-action-divider" aria-hidden="true" />
+      <button type="button" className="selection-arrange" onClick={onArrange} disabled={selectedCount < 2} title="Arrange selected nodes on grid" aria-label="Arrange selected nodes on grid">
+        <Grid2X2 size={18} />
+      </button>
       <button onClick={onRunAll} disabled={!runnableCount} title={runnableCount ? `Run or play ${runnableCount} selected node${runnableCount === 1 ? "" : "s"}` : "No runnable selected nodes"}>
         <Play size={18} />
         <span>Run All</span>
@@ -58,6 +61,14 @@ export const SelectionActionBar = React.memo(function SelectionActionBar({ bound
       <button onClick={onSavePreset} title="Save selected nodes as a Newt Preset"><Save size={17} /><span>Newt Preset</span></button>
     </div>
   );
+});
+
+export const CanvasSnapToggle = React.memo(function CanvasSnapToggle({ enabled, onToggle }) {
+  return <button type="button" className="canvas-snap-toggle" aria-label="Snap nodes to grid" aria-pressed={enabled}
+    title={`Snap to grid: ${enabled ? "On" : "Off"}. Hold Alt while dragging to bypass.`}
+    onPointerDown={event => event.stopPropagation()} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }} onClick={onToggle}>
+    <Magnet size={17} />
+  </button>;
 });
 
 export function UnsavedWorkflowPrompt({ actionLabel, saving = false, error = "", onDecision }) {

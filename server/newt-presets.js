@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, copyFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { buildNewtPresetGraph } from "../src/myNewt/presets.js";
+import { newtPresetSummary, newtPresetRevision } from "./newt-preset-discovery.js";
 
 export class NewtPresetStore {
   constructor({ directory, systemDirectory, assetsDirectory, assetsUrl, resolveAsset, collectAssetUrls, rewriteAssetUrls }) {
@@ -59,7 +60,7 @@ export class NewtPresetStore {
     const system = await this.systemPresets();
     const systemIds = new Set(system.map(({ preset }) => preset.id));
     await mkdir(this.directory, { recursive: true });
-    const summary = (preset, isSystem) => ({ id: preset.id, name: preset.name, createdAt: preset.createdAt, nodeCount: preset.graph.nodes.length, slots: preset.graph.slots || [], isSystem });
+    const summary = newtPresetSummary;
     const items = system.map(({ preset }) => summary(preset, true));
     for (const file of await readdir(this.directory)) {
       if (!/^[a-f0-9-]{36}\.json$/.test(file)) continue;
@@ -69,16 +70,16 @@ export class NewtPresetStore {
     }
     return items.sort((a, b) => a.name.localeCompare(b.name));
   }
-  async get(id) {
+  async get(id, { restoreAssets = true } = {}) {
     const file = this.file(id);
     const system = (await this.systemPresets()).find(({ preset }) => preset.id === id);
     if (system) {
-      await this.restoreSystemAssets(system);
-      return system.preset;
+      if (restoreAssets) await this.restoreSystemAssets(system);
+      return { ...system.preset, revision: newtPresetRevision(system.preset) };
     }
     const preset = await readJsonFile(file, null);
     if (!preset) throw new Error("This Newt Preset is no longer available.");
-    return { ...preset, isSystem: false };
+    return { ...preset, isSystem: false, revision: newtPresetRevision(preset) };
   }
   save(value) {
     const operation = this.queue.catch(() => {}).then(() => this.write(value));
@@ -102,7 +103,7 @@ export class NewtPresetStore {
       }
       const preset = { id, name: label, version: 2, createdAt: new Date().toISOString(), isSystem: false, graph: this.rewriteAssetUrls(clean, urls) };
       await writeJsonAtomic(this.file(id), preset);
-      return preset;
+      return { ...preset, revision: newtPresetRevision(preset) };
     } catch (error) {
       await rm(folder, { recursive: true, force: true }).catch(() => {});
       throw new Error(`Preset was not saved. ${error.message}`);

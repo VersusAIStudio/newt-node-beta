@@ -101,6 +101,7 @@ export function MyNewtRemotePage() {
         <button className="primary" disabled={busy || !connected || !state.online} onClick={connectProject}><Link size={18} />Connect to this project</button>
       </section> : <>
       <dl className="costs"><div><dt>Budget</dt><dd>{money(job?.budget ?? state.budget)}</dd></div><div><dt>Spent</dt><dd>{money(job?.spent ?? 0)}</dd></div><div><dt>Reserved</dt><dd>{money(job?.reserved ?? 0)}</dd></div><div><dt>Remaining</dt><dd>{money(job?.remaining ?? state.budget)}</dd></div></dl>
+      {job?.unpricedCount > 0 && <p role="status">{job.unpricedCount} generation costs unknown. Budget totals exclude these charges.</p>}
       {job && <section className="task"><h3>Current Task</h3><p>{job.brief}</p>{job.message && <p className="message" role="status">{job.message}</p>}</section>}
       {job?.plan && <section><h3>Workflow Plan</h3><p>{job.plan.summary}</p><ol className="steps">{job.plan.steps.map((step) => <li key={step.id}>{step.status === "complete" ? <Check size={16} /> : <Circle size={14} />}<span>{step.title}</span></li>)}</ol><p className="estimate">{job.execution === "local" ? "Local action: $0.00" : `Media estimate: ${money(job.plan.estimatedGenerationCost)} + reasoning usage`}</p></section>}
       {preview && <section><h3>Next Generation</h3><strong>{preview.title}</strong><p>{[preview.model, preview.provider, preview.count ? `${preview.count} output${preview.count === 1 ? "" : "s"}` : "", preview.resolution, preview.aspectRatio, preview.duration, preview.audio].filter(Boolean).join(" | ")}</p>

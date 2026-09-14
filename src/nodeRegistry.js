@@ -13,6 +13,7 @@ export const nodeTypeDefinitions = [
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
   { type: "skillDirector", label: "Director" },
+  { type: "editor", label: "Editor" },
   { type: "storyboard", label: "Storyboard" },
   { type: "coverage", label: "Coverage" },
   { type: "composer", label: "Composer" },

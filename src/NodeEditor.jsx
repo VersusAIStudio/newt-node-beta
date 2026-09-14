@@ -1,4 +1,7 @@
 import React from "react";
+import { createEditorTimeline, normalizeEditorTimeline, editorRenderSignature } from "./editorTimeline.js";
+const EditorNodeBody = React.lazy(() => import("./components/EditorNodeBody.jsx").then(module => ({ default: module.EditorNodeBody })));
+const EditorMonitor = React.lazy(() => import("./components/EditorMonitor.jsx").then(module => ({ default: module.EditorMonitor })));
 import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
 import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
 import { runAudioModelGeneration } from "./nodeRunners/audioModels.js";
@@ -22,6 +25,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clapperboard,
+  PanelsTopLeft,
   Compass,
   Download,
   FileAudio,
@@ -35,7 +39,6 @@ import {
   Lock,
   Maximize2,
   Megaphone,
-  Minus,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightOpen,
@@ -70,7 +73,7 @@ import {
   generationProviderFromSettings
 } from "./generationPricing.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
-import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
+import { CanvasSnapToggle, EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
 import {
@@ -180,7 +183,6 @@ import {
   characterVideoNeutralBaseWardrobePrompt,
   characterVideoWardrobeEditPrompt,
   characterWardrobeEditPrompt,
-  characterWardrobeMaskRegions,
   characterWardrobeVariantIsCurrent,
   generateCharacterBaseSheets,
   upsertCharacterWardrobeVariant
@@ -208,6 +210,7 @@ import {
   imageModelOptions,
   creativeImageDefaultModel,
   coverageModelOptions,
+  storyboardImageDefaultModel,
   storyboardImageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
@@ -284,6 +287,8 @@ import {
   graphBoundsForNodes,
   groupToRect,
   localPortPointFromRects,
+  normalizeEditorNodeWidth,
+  normalizeOutputDrawerWidth,
   normalizePlainTextNodeSize,
   normalizeRect,
   nonOverlappingPosition,
@@ -361,6 +366,9 @@ import { degreesToRadians, radiansToDegrees } from "./threeRuntime.js";
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { normalizeVideoGenerateAudio } from "./videoAudio.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
+import { canvasSnapToGridEnabled, rememberCanvasSnapToGrid, rememberOutputDrawerWidth, savedOutputDrawerWidth } from "./workflowPreferences.js";
+import { arrangeNodesOnGrid, canvasDragAnchor, canvasDragDelta, canvasGridSize, nonOverlappingGridPosition } from "./nodeGrid.js";
+import { arrangeMyNewtCanvas, removeMyNewtCanvasNodes } from "./myNewt/canvasActions.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import {
   clearStaleRunningState,
@@ -379,6 +387,7 @@ const ColorIdMattePicker = React.lazy(() => import("./components/ColorIdMatteCon
 const ColorIdMatteVideoPicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMatteVideoPicker })));
 
 const nodeIcons = {
+  editor: PanelsTopLeft,
   myNewt: NewtIcon,
   plainText: Type,
   image: FileImage,
@@ -409,6 +418,14 @@ const nodeCatalog = nodeTypeDefinitions.map((definition) => ({
 }));
 
 const nodeHelpContent = {
+  editor: {
+    title: "Editor",
+    lines: ["Non-destructive video and audio timeline. Connect sources to append clips; embedded sound stays linked on an audio track.",
+      "Space: play/pause. I / O: mark the export range. Left / Right: one frame; Shift: ten frames. Home / End: sequence boundaries.",
+      "Cmd/Ctrl+B: split at the playhead. Delete/Backspace: delete clips. Cmd/Ctrl+D: duplicate. Cmd/Ctrl+Z: undo; Shift+Z: redo. Shortcuts apply while the timeline has focus.",
+      "Drag clip edges to trim. Alt temporarily disables snapping. Higher video tracks cover lower tracks; audio tracks mix. Locks protect clips, not playback.",
+      "Preview displays the live sequence. Export saves an MP4 of the marked range locally; the output can then feed other video inputs. The camera saves a PNG at the playhead. No paid API is used."]
+  },
   plainText: {
     title: "Text",
     lines: [
@@ -831,101 +848,6 @@ const storyboardCharacterSheetBasePrompt = characterSheetPrompt
     "Create one high-resolution horizontal character photo sheet on a clean white background.",
     "Create one high-resolution horizontal character storyboard reference sheet on a clean white background."
   );
-const initialNodes = [
-  {
-    id: "text-1",
-    type: "plainText",
-    x: 123.3203125,
-    y: 102.61370849609375,
-    data: {
-      title: "Prompt 1",
-      text: "A dog with a ball."
-    }
-  },
-  {
-    id: "image-model-1",
-    type: "imageModel",
-    x: 546.8897713928794,
-    y: 96.03308838042841,
-    data: {
-      title: "Image Model",
-      model: imageModelNames.openAiImage2,
-      prompt: "A serene landscape with mountains",
-      aspectRatio: "16:9",
-      resolution: "2K",
-      kreaCreativity: "raw",
-      batchCount: "1",
-      settingsOpen: true
-    }
-  },
-  {
-    id: "text-2",
-    type: "plainText",
-    x: 124.23687795605827,
-    y: 379.67701542395395,
-    data: {
-      title: "Prompt",
-      text: "The location is a park."
-    }
-  },
-  {
-    id: "camera-1",
-    type: "camera",
-    x: 101.27786006671954,
-    y: 658.981734327887,
-    data: {
-      title: "Camera",
-      shotPreset: "MS",
-      lensPreset: "35mm",
-      typePreset: "None"
-    }
-  },
-  {
-    id: "style-1",
-    type: "style",
-    x: 102.00101081119362,
-    y: 970.3715360841652,
-    data: {
-      title: "Style",
-      stylePreset: "Cinematic Standard",
-      customPaletteRgbText: "",
-      customPalettePicker: "#ddc631",
-      customPaletteColors: [],
-      customPalettePreviewUrl: "",
-      customPaletteSourceName: "",
-      customPaletteStatus: "",
-      customPaletteError: ""
-    }
-  },
-  {
-    id: "preview-1",
-    type: "preview",
-    x: 1022.6723497659082,
-    y: 313.64054190479334,
-    data: {
-      title: "Preview",
-      previewScale: 2.42,
-      previewItemIndex: 0,
-      previewTab: "preview",
-      previewLayoutItems: []
-    }
-  }
-];
-
-const initialEdges = [
-  { id: "edge-1", from: { nodeId: "text-1", port: "promptOut" }, to: { nodeId: "image-model-1", port: "promptIn" }, color: portColors.prompt },
-  { id: "edge-2", from: { nodeId: "text-2", port: "promptOut" }, to: { nodeId: "image-model-1", port: "promptIn" }, color: portColors.prompt },
-  { id: "edge-3", from: { nodeId: "camera-1", port: "cameraOut" }, to: { nodeId: "image-model-1", port: "cameraIn" }, color: portColors.camera },
-  { id: "edge-4", from: { nodeId: "style-1", port: "styleOut" }, to: { nodeId: "image-model-1", port: "styleIn" }, color: portColors.style },
-  { id: "edge-5", from: { nodeId: "image-model-1", port: "imageOut" }, to: { nodeId: "preview-1", port: "sourceIn" }, color: portColors.image }
-];
-
-const initialViewport = {
-  x: -1.7490859208151575,
-  y: 16.552319630928295,
-  scale: 0.7127650165308045
-};
-
 const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
 const previewBaseWidth = 330;
@@ -981,7 +903,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const visibleNodeCatalog = React.useMemo(() => nodeMenuEntries(nodeCatalog, nodePreferences), [nodePreferences]);
   const canvasRef = React.useRef(null);
   const sceneRef = React.useRef(null);
-  const zoomReadoutRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
   const contextMenuRef = React.useRef(null);
@@ -995,7 +916,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const outputHistoryLoadedRef = React.useRef(false);
   const outputHistoryLoadPromiseRef = React.useRef(null);
   const outputHistoryReloadRequestedRef = React.useRef(false);
-  const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, initialViewport, normalizeEditorGraph }), []);
+  const savedDraft = React.useMemo(() => loadNodeEditorDraft({ normalizeEditorGraph }), []);
   const viewportRef = React.useRef(savedDraft.viewport);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
@@ -1018,6 +939,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [contextMenu, setContextMenu] = React.useState(null);
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(true);
   const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
+  const [outputDrawerWidth, setOutputDrawerWidth] = React.useState(savedOutputDrawerWidth);
+  const resizeOutputDrawer = React.useCallback((width, remember = false) => {
+    const nextWidth = normalizeOutputDrawerWidth(width);
+    setOutputDrawerWidth(nextWidth);
+    if (remember) rememberOutputDrawerWidth(nextWidth);
+  }, []);
+  const [snapToGrid, setSnapToGrid] = React.useState(canvasSnapToGridEnabled);
   const [outputHistory, setOutputHistory] = React.useState([]);
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
@@ -1156,9 +1084,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSelectedEdgeId,
     setProjectMenuOpen,
     setFileMenuOpen,
-    newProjectNodes: initialNodes,
-    newProjectEdges: initialEdges,
-    newProjectViewport: initialViewport,
     normalizeEditorGraph,
     dedupeEdges,
     pushUndoSnapshot,
@@ -1545,13 +1470,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       scene.style.transform = `translate3d(${nextViewport.x}px, ${nextViewport.y}px, 0) scale(${nextViewport.scale})`;
     }
     if (canvas) {
-      const gridSize = 28 * nextViewport.scale;
+      const gridSize = canvasGridSize * nextViewport.scale;
       canvas.style.setProperty("--grid-size", `${gridSize}px`);
       canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
       canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
-    }
-    if (zoomReadoutRef.current) {
-      zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
     }
   }
 
@@ -1713,9 +1635,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function createNodeData(type, label, count) {
     const data = createDefaultNodeData(type, label, count);
     if (type === "imageModel") {
-      const model = enabledImageModels.includes(imageModelNames.openAiImage2)
-        ? imageModelNames.openAiImage2
-        : enabledImageModels[0] || imageModelNames.openAiImage2;
+      const model = enabledImageModels.includes(data.model)
+        ? data.model
+        : enabledImageModels[0] || data.model;
       return {
         ...data,
         ...imageModelSelectionPatch(data, model)
@@ -2035,6 +1957,37 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSaveStatus(`Grouped ${selectedNodeIds.length} nodes`);
   }
 
+  function toggleCanvasSnap() {
+    const enabled = !snapToGrid;
+    setSnapToGrid(enabled);
+    rememberCanvasSnapToGrid(enabled);
+  }
+
+  function arrangeSelectedNodes() {
+    if (selectedNodeIds.length < 2 || dragState) return;
+    const currentNodes = nodesRef.current;
+    const next = arrangeNodesOnGrid(currentNodes, selectedNodeIds, {
+      bounds: new Map(currentNodes.map(node => [node.id, placementRect(node)])),
+      groups: groups.map(group => ({ ...group, nodeIds: getNodeIdsInsideGroup(group) }))
+    });
+    if (!next.changed) { setSaveStatus("Selected nodes are already aligned"); return; }
+    pushUndoSnapshot();
+    nodesRef.current = next.nodes;
+    setNodes(next.nodes);
+    setGroups(next.groups);
+    const canvas = canvasRef.current, bounds = next.bounds;
+    if (canvas && bounds) {
+      const scale = Math.max(viewportScaleFloor, Math.min(viewportRef.current.scale,
+        Math.max(1, canvas.clientWidth - 96) / (bounds.right - bounds.left), Math.max(1, canvas.clientHeight - 160) / (bounds.bottom - bounds.top)));
+      renderTransientViewport({ scale, x: canvas.clientWidth / 2 - (bounds.left + bounds.right) / 2 * scale,
+        y: canvas.clientHeight / 2 + 20 - (bounds.top + bounds.bottom) / 2 * scale });
+      commitTransientViewport();
+    }
+    focusCanvasSelection(canvasRef.current);
+    schedulePortPositionRefresh();
+    setSaveStatus(`Aligned ${selectedNodeIds.length} nodes`);
+  }
+
   function updateGroup(groupId, patch) {
     setGroups((current) => current.map((group) => (group.id === groupId ? { ...group, ...patch } : group)));
   }
@@ -2064,6 +2017,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setDragState({
       type: "group",
       groupId: group.id,
+      snapAnchor: canvasDragAnchor(nodes.filter(node => nodeSet.has(node.id)), group),
       startPointer: pointer,
       group: {
         x: group.x,
@@ -2914,14 +2868,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   } = {}) {
     let generated = regenerateImage ? null : existingVariant?.generated || null;
     if (!(generated?.url || generated?.localUrl)) {
-      const imageMask = await createCharacterWardrobeEditMaskDataUrl(baseSheet, "image");
       generated = await runCharacterWardrobeEdit({
         node,
         provider: generationProvider,
         prompt: characterWardrobeEditPrompt,
         baseSheet,
         wardrobe,
-        editMaskDataUrl: imageMask,
         workflowContext: workflowRequestContext(),
         characterTag: characterTag(node)
       });
@@ -2936,14 +2888,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       && !(videoGenerated?.url || videoGenerated?.localUrl)
     ) {
       try {
-        const videoMask = await createCharacterWardrobeEditMaskDataUrl(baseVideoSheet, "video");
         videoGenerated = await runCharacterWardrobeEdit({
           node,
           provider: generationProvider,
           prompt: characterVideoWardrobeEditPrompt,
           baseSheet: baseVideoSheet,
           wardrobe,
-          editMaskDataUrl: videoMask,
           workflowContext: workflowRequestContext(),
           characterTag: characterTag(node),
           sheetKind: "video"
@@ -4519,6 +4469,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const pointer = screenToScene(event.clientX, event.clientY);
     setDragState({
       type: "nodes",
+      snapAnchor: { x: node.x, y: node.y },
       startPointer: pointer,
       nodes: nodes
         .filter((item) => selectedIds.includes(item.id))
@@ -4546,6 +4497,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const selected = new Set(selectedNodeIds);
     setDragState({
       type: "nodes",
+      snapAnchor: canvasDragAnchor(nodes.filter(item => selected.has(item.id))),
       startPointer: pointer,
       nodes: nodes
         .filter((item) => selected.has(item.id))
@@ -4576,8 +4528,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (dragState?.type === "nodes") {
-      const deltaX = pointer.x - dragState.startPointer.x;
-      const deltaY = pointer.y - dragState.startPointer.y;
+      const { x: deltaX, y: deltaY } = canvasDragDelta(dragState.snapAnchor, {
+        x: pointer.x - dragState.startPointer.x, y: pointer.y - dragState.startPointer.y
+      }, snapToGrid && !event.altKey);
       const dragged = new Map(dragState.nodes.map((item) => [item.id, item]));
       const draggedGroups = new Map((dragState.groups || []).map((item) => [item.id, item]));
       if (draggedGroups.size) {
@@ -4609,8 +4562,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (dragState?.type === "group") {
-      const deltaX = pointer.x - dragState.startPointer.x;
-      const deltaY = pointer.y - dragState.startPointer.y;
+      const { x: deltaX, y: deltaY } = canvasDragDelta(dragState.snapAnchor, {
+        x: pointer.x - dragState.startPointer.x, y: pointer.y - dragState.startPointer.y
+      }, snapToGrid && !event.altKey);
       const dragged = new Map(dragState.nodes.map((item) => [item.id, item]));
 
       setGroups((current) =>
@@ -4815,6 +4769,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function handleCanvasWheel(event) {
+    if (event.target.closest(".selection-action-bar")) {
+      event.stopPropagation();
+      if (event.ctrlKey || event.metaKey) event.preventDefault();
+      return;
+    }
     const storyboardScroller = event.target.closest(".storyboard-scroll-surface");
     if (storyboardScroller && shouldPrioritizeSelectedTextareaWheel(event)) {
       const nestedTextarea = event.target.closest("textarea");
@@ -5013,7 +4972,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       ...groups.filter((group) => !group.nodeIds?.some((id) => excluded.has(id))).map(groupToRect)];
   }
 
-  async function settleNewNodePlacement(id) {
+  async function settleNewNodePlacement(id, snap = false) {
     // Two frames allow expanded bodies and ports to mount; the timer also works in a background tab.
     await new Promise((resolve) => {
       let frame;
@@ -5026,7 +4985,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const occupied = occupiedPlacementRects(new Set([id]));
     const rendered = getNodeBounds(id);
     const preferred = rendered.right > rendered.left ? current : { x: Math.max(current.x, ...occupied.map((item) => item.right + 80)), y: current.y };
-    const position = nonOverlappingPosition({ width: rect.right - rect.left, height: rect.bottom - rect.top }, preferred, occupied);
+    const position = (snap ? nonOverlappingGridPosition : nonOverlappingPosition)({ width: rect.right - rect.left, height: rect.bottom - rect.top }, preferred, occupied);
     const next = { ...current, ...position };
     nodesRef.current = nodesRef.current.map((node) => node.id === id ? next : node);
     setNodes(nodesRef.current);
@@ -5187,12 +5146,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         skillDirector: ["imageIn", "locationIn"]
       },
       video: {
+        editor: ["videoIn"],
         preview: ["sourceIn"],
         videoModel: ["referenceVideoIn"],
         utility: ["referenceVideoIn", "maskVideoIn"],
         skillDirector: ["referenceVideoIn"]
       },
       audio: {
+        editor: ["audioIn"],
         audioModel: ["audioIn"],
         preview: ["sourceIn"],
         videoModel: ["referenceAudioIn"],
@@ -5234,6 +5195,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function autoConnectionOutputKind(source, from) {
+    if (source.type === "editor") return "video";
     if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "coverage") return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "image" : "";
@@ -5275,6 +5237,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (source.type === "editor") {
+      if (target.type === "preview") return "";
+      if (!connectedOutputItem(source, { from, to })?.url) return "Export the current Editor sequence before connecting it to a video input";
+    }
+    if (target.type === "editor") return "";
     if (target.type === "myNewt") return "";
     if (target.type === "audioModel") return audioInputEnabled(target.data.audioMode, to.port) ? "" : "Select Speech to Speech for an audio input, or a text-driven mode for a prompt input";
 
@@ -5420,7 +5387,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (["referenceVideoIn", "maskVideoIn"].includes(to.port)) {
-        if (["video", "videoModel"].includes(source.type)) return "";
+        if (["video", "videoModel", "editor"].includes(source.type)) return "";
         return "Video input accepts video outputs";
       }
     }
@@ -5507,7 +5474,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (target?.type === "preview") {
-      if (["image", "video", "audio", "audioModel", "imageModel", "videoModel", "utility", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
+      if (["image", "video", "audio", "audioModel", "imageModel", "videoModel", "utility", "transfer", "composer", "frameIt", "coverage", "model3d", "editor"].includes(source?.type)) return "";
       return "Preview accepts image, video, audio, and 3D sources";
     }
 
@@ -6395,7 +6362,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return { type, label, ports: { input, output }, editableFields: ["title", ...(myNewtFields[type] || [])],
       defaults: Object.fromEntries((myNewtFields[type] || []).filter((key) => defaults[key] !== undefined).map((key) => [key, defaults[key]])),
       options: myNewtOptions[type] || {}, modelControls: Object.fromEntries((myNewtOptions[type]?.model || []).map((model) => [model, myNewtModelControls(type, model)])),
-      stages: myNewtRunStages[type] || [], manualOnly: ["composer", "utility", "transfer", "audioModel"].includes(type) };
+      stages: myNewtRunStages[type] || [], manualOnly: ["composer", "utility", "transfer", "audioModel", "editor"].includes(type) };
   }), [myNewtOptions, generationProvider]);
   const newtPresets = useNewtPresets({
     projectId, onStatus: setSaveStatus,
@@ -6413,6 +6380,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const clean = buildNewtPresetGraph(graph);
       const offset = newtPresetOffset(clean, occupiedPlacementRects());
       const copied = bindNewtPresetInputs(instantiateNewtPreset(clean, offset), bindings, nodesRef.current);
+      if (options.agent) {
+        const rects = [...copied.nodes.map(node => {
+          const rect = estimatedNodeRect(node);
+          return { ...rect, right: node.x + (node.presetSize?.width || rect.right - rect.left), bottom: node.y + (node.presetSize?.height || rect.bottom - rect.top) };
+        }), ...copied.groups.map(groupToRect)];
+        const x = Math.min(...rects.map(rect => rect.left)), y = Math.min(...rects.map(rect => rect.top));
+        const position = nonOverlappingGridPosition({ width: Math.max(...rects.map(rect => rect.right)) - x, height: Math.max(...rects.map(rect => rect.bottom)) - y }, { x, y }, occupiedPlacementRects());
+        copied.nodes = copied.nodes.map(node => ({ ...node, x: node.x + position.x - x, y: node.y + position.y - y }));
+        copied.groups = copied.groups.map(group => ({ ...group, x: group.x + position.x - x, y: group.y + position.y - y }));
+      }
       if (options.agent && graph.externalEdges?.length) {
         const idMap = new Map(clean.nodes.map((node, index) => [node.id, copied.nodes[index]?.id]));
         copied.edges.push(...graph.externalEdges.map((edge) => {
@@ -6482,7 +6459,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     duplicateLocal: (nodeIds, count) => newtPresets.insertGraphForAgent(buildMyNewtDuplicateGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, nodeIds, count), { preserveIncoming: true }),
     saveProject: () => saveProjectRef.current({ preserveProjectId: true }),
     renameProject: (name) => setProjectName(name),
-    settlePlacement: settleNewNodePlacement,
+    settlePlacement: id => settleNewNodePlacement(id, true),
+    arrange: (nodeIds, layoutBlocks) => {
+      const graph = { nodes: nodesRef.current, edges: edgesRef.current, groups };
+      const next = arrangeMyNewtCanvas(graph, nodeIds, { layoutBlocks, bounds: new Map(graph.nodes.map(node => [node.id, placementRect(node)])) });
+      if (next.changed) {
+        pushUndoSnapshot(); nodesRef.current = next.nodes; setNodes(next.nodes); setGroups(next.groups);
+        schedulePortPositionRefresh();
+      }
+      return { arrangedIds: nodeIds, changed: next.changed };
+    },
+    cleanup: nodeIds => {
+      const next = removeMyNewtCanvasNodes({ nodes: nodesRef.current, edges: edgesRef.current, groups }, nodeIds);
+      pushUndoSnapshot();
+      nodesRef.current = next.nodes; edgesRef.current = next.edges;
+      setNodes(next.nodes); setEdges(next.edges); setGroups(next.groups);
+      setSelectedNodeIds(current => current.filter(id => !nodeIds.includes(id))); setSelectedEdgeId(null);
+      schedulePortPositionRefresh();
+      return { removedIds: nodeIds, filesDeleted: false };
+    },
     getGraph: () => ({ nodes: nodesRef.current, edges: edgesRef.current, groups, selectedNodeIds }),
     restore: (graph) => {
       pushUndoSnapshot();
@@ -6548,10 +6543,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       validateMyNewtPatch({ id, type, data }, patch, { allowExisting: true }, [id]);
       const next = { id, type, x: Number.isFinite(request.x) ? Math.min(50000, Math.max(-50000, request.x)) : graphBoundsForNodes(graph).right + 80, y: Number.isFinite(request.y) ? Math.min(50000, Math.max(-50000, request.y)) : 120, data: newtCreationData(type, data, patch) };
       const rect = placementRect(next);
-      Object.assign(next, nonOverlappingPosition({ width: rect.right - rect.left, height: rect.bottom - rect.top }, next, occupiedPlacementRects()));
+      Object.assign(next, nonOverlappingGridPosition({ width: rect.right - rect.left, height: rect.bottom - rect.top }, next, occupiedPlacementRects()));
       pushUndoSnapshot();
       nodesRef.current = [...graph, next]; setNodes(nodesRef.current);
-      return settleNewNodePlacement(id);
+      return settleNewNodePlacement(id, true);
     },
     connect: (from, to) => {
       const source = nodesRef.current.find((node) => node.id === from.nodeId);
@@ -6588,7 +6583,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const myNewtController = { ...myNewtTaskController, presets: newtPresets, modelOptions: { image: enabledImageModels, video: enabledVideoModels } };
 
   return (
-    <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
+    <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`} style={{ "--output-drawer-width": `${outputDrawerWidth}px` }}>
       {newtPresets.draft && <NewtPresetDialog controller={newtPresets} />}
       {composerEditorNode && (
         <ComposerEditorModal
@@ -6719,9 +6714,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         className="node-canvas"
         tabIndex={-1}
         style={{
-          "--grid-size": `${28 * viewportRef.current.scale}px`,
-          "--grid-x": `${positiveModulo(viewportRef.current.x, 28 * viewportRef.current.scale)}px`,
-          "--grid-y": `${positiveModulo(viewportRef.current.y, 28 * viewportRef.current.scale)}px`
+          "--grid-size": `${canvasGridSize * viewportRef.current.scale}px`,
+          "--grid-x": `${positiveModulo(viewportRef.current.x, canvasGridSize * viewportRef.current.scale)}px`,
+          "--grid-y": `${positiveModulo(viewportRef.current.y, canvasGridSize * viewportRef.current.scale)}px`
         }}
         onPointerDown={startCanvasPointerDown}
         onPointerMove={handlePointerMove}
@@ -6776,6 +6771,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               key={node.id}
               myNewtController={myNewtController}
               node={node}
+              workflowContext={workflowRequestContext()}
               onDragStart={startNodeDrag}
               onRemove={removeNode}
               onUpdate={updateNode}
@@ -6843,6 +6839,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             onGroup={createGroupFromSelection}
             onSavePreset={newtPresets.beginSave}
             onMoveStart={startSelectionMove}
+            onArrange={arrangeSelectedNodes}
           />
         )}
         {contextMenu && (
@@ -6858,23 +6855,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             })}
           </div>
         )}
-        <div className="zoom-controls" onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1 / 1.16)} title="Zoom out" aria-label="Zoom out">
-            <Minus size={14} />
-          </button>
-          <button ref={zoomReadoutRef} type="button" onClick={resetViewportZoom} title="Reset zoom" aria-label="Reset zoom" className="zoom-readout">
-            {Math.round(viewport.scale * 100)}%
-          </button>
-          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1.16)} title="Zoom in" aria-label="Zoom in">
-            <Plus size={14} />
-          </button>
-        </div>
+        <CanvasSnapToggle enabled={snapToGrid} onToggle={toggleCanvasSnap} />
       </div>
       {!outputsCollapsed && (
         <ProjectOutputDrawer
           items={projectOutputs}
+          width={outputDrawerWidth}
+          onResize={resizeOutputDrawer}
           onClose={() => setOutputsCollapsed(true)}
-          onRefresh={loadOutputHistory}
           onPreviewOpen={setPreviewLightboxItem}
           outputDragMime={outputDragMime}
         />
@@ -7069,6 +7057,7 @@ function mergeTextareaHeightsFromCanvas(nodes = [], canvas) {
 
 function NodeCard({
   node,
+  workflowContext,
   myNewtController,
   onDragStart,
   onRemove,
@@ -7202,6 +7191,7 @@ function NodeCard({
         "--frame-it-scale": frameItScalable ? node.data.frameItScale || 1 : 1,
         "--text-node-width": plainTextSize ? `${plainTextSize.width}px` : undefined,
         "--text-node-height": plainTextSize ? `${plainTextSize.height}px` : undefined,
+        "--editor-node-width": node.type === "editor" ? `${normalizeEditorNodeWidth(node.data.editorNodeWidth)}px` : undefined,
         "--reference-tag-color": tagHighlight?.color || "#4d8dff"
       }}
       data-node-card-id={node.id}
@@ -7285,6 +7275,7 @@ function NodeCard({
 
       <NodeBody
         node={node}
+        workflowContext={workflowContext}
         myNewtController={myNewtController}
         onUpdate={onUpdate}
         incoming={incoming}
@@ -8185,6 +8176,7 @@ function formatComposerControlValue(value, precision) {
 
 function NodeBody({
   node,
+  workflowContext,
   myNewtController,
   onUpdate,
   incoming,
@@ -8253,6 +8245,15 @@ function NodeBody({
 
   if (node.type === "myNewt") {
     return <MyNewtNodeBody node={node} config={config} incoming={incoming} onUpdate={onUpdate} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} controller={myNewtController} />;
+  }
+  if (node.type === "editor") {
+    const sources = ["videoIn", "audioIn"].flatMap(port => (incoming[port] || []).flatMap(({ source, edge }) => {
+      const item = connectedOutputItem(source, edge);
+      return item?.url ? [{ ...item, key: item.url }] : [];
+    }));
+    return <React.Suspense fallback={<div className="node-body">Loading Editor...</div>}><EditorNodeBody node={node} config={config} sources={sources}
+      workflowContext={workflowContext} onUpdate={onUpdate} onUndoSnapshot={onUndoSnapshot} onPreviewOpen={onPreviewOpen}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} /></React.Suspense>;
   }
   if (node.type === "audioModel") {
     return <AudioModelNodeBody node={node} config={config} prompt={connectedText(incoming.promptIn) || node.data.prompt}
@@ -10000,12 +10001,13 @@ function NodeBody({
 
         {activePreviewTab === "preview" ? (
           <>
-            <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
+            <div className={`preview-stage ${previewItem || previewSource?.editorTimeline ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
+              {previewSource?.editorTimeline && <React.Suspense fallback={<span>Loading timeline...</span>}><EditorMonitor nodeId={previewSource.sourceNodeId} timeline={previewSource.editorTimeline} /></React.Suspense>}
               {previewItem?.type === "image" && fullResolutionImageUrl(previewItem) && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={fullResolutionImageUrl(previewItem)} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
               {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
               {previewItem?.type === "audio" && <audio key={previewItem.url} src={previewItem.url} controls preload="metadata" />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} label={previewItem.label || previewSource.label} />}
-              {!previewItem && <span>Preview will appear here</span>}
+              {!previewItem && !previewSource?.editorTimeline && <span>Preview will appear here</span>}
             </div>
             {previewItems.length > 1 && (
               <div className="preview-frame-nav" onPointerDown={(event) => event.stopPropagation()}>
@@ -12339,6 +12341,11 @@ function formatFrameTimeDisplay(value) {
 
 function getNodeConfig(type) {
   const configs = {
+    editor: {
+      icon: PanelsTopLeft,
+      input: [{ id: "videoIn", label: "Video", color: portColors.video }, { id: "audioIn", label: "Audio", color: portColors.audio }],
+      output: [{ id: "videoOut", label: "Output", color: portColors.video }]
+    },
     myNewt: {
       icon: NewtIcon,
       input: [
@@ -12505,6 +12512,7 @@ function getNodeConfig(type) {
 
 function createDefaultNodeData(type, label, count) {
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
+  if (type === "editor") return { title, editorTimeline: createEditorTimeline(), editorNodeWidth: 1100, editorZoom: 48, editorPlayhead: 0, editorStills: [], resultItems: [], resultUrl: "", resultType: "video" };
   if (type === "myNewt") return { title: nodeTypeLabel(type), ...myNewtDefaults };
   if (type === "audioModel") return { title, ...audioModelDefaults };
 
@@ -12612,7 +12620,7 @@ function createDefaultNodeData(type, label, count) {
       storyboardNotes: "",
       storyboardAutoQc: true,
       frameCount: "Auto",
-      model: creativeImageDefaultModel,
+      model: storyboardImageDefaultModel,
       quality: "high",
       aspectRatio: storyboardDefaultAspectRatio,
       resolution: storyboardDefaultResolution,
@@ -12853,7 +12861,7 @@ function createDefaultNodeData(type, label, count) {
   if (type === "imageModel") {
     return {
       title,
-      model: imageModelNames.openAiImage2,
+      model: imageModelNames.nanoBananaPro,
       prompt: "",
       aspectRatio: "16:9",
       resolution: "2K",
@@ -14035,6 +14043,7 @@ function expandStoryboardDirectorIncoming(incoming = {}, incomingByNode = {}) {
 }
 
 function connectedOutputItem(source, edge) {
+  if (source?.type === "editor" && (!source.data?.editorExportTimeline || editorRenderSignature(normalizeEditorTimeline(source.data.editorExportTimeline)) !== editorRenderSignature(normalizeEditorTimeline(source.data?.editorTimeline)))) return null;
   if (source?.type === "character") {
     if (!source.data?.locked || !source.data?.activated) return null;
     if (edge?.from?.port === "voiceOut") {
@@ -14608,6 +14617,8 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
 function connectedPreviewSources(items = []) {
   return items
     .map(({ source, edge }) => {
+      if (source.type === "editor") return { id: `${source.id}:${edge.from.port}`, sourceNodeId: source.id, sourcePort: edge.from.port,
+        label: sourceLabel(source), type: "video", items: [], editorTimeline: normalizeEditorTimeline(source.data.editorTimeline), editorStills: source.data.editorStills || [] };
       const sourceType = previewMediaType(source, edge);
       const resultItems = previewSourceResultItems(source, edge, sourceType);
       if (!resultItems.length) return null;
@@ -14727,6 +14738,7 @@ function previewLayoutImageItems(items = []) {
 }
 
 function previewLayoutSourceItems(source = null) {
+  if (source?.editorTimeline) return previewLayoutImageItems(source.editorStills);
   const items = Array.isArray(source?.items) ? source.items : [];
   const storyboardLayoutItems = items.flatMap((item) => (
     Array.isArray(item?.layoutItems) ? item.layoutItems : []
@@ -14947,6 +14959,7 @@ function selectedPreviewSource(sources = [], selectedId) {
 }
 
 function previewMediaType(source, edge) {
+  if (source.type === "editor") return "video";
   if (source.type === "audio" || source.type === "audioModel" || (source.type === "character" && edge?.from?.port === "voiceOut")) return "audio";
   if (source.type === "storyboard" && storyboardOutputItem(source, edge)) return "image";
   if (source.type === "autoAspect" && autoAspectOutputItem(source, edge)) return "image";
@@ -15558,31 +15571,6 @@ function characterWardrobeVariantId(wardrobe) {
   return wardrobe?.id || characterDefaultWardrobeId;
 }
 
-async function createCharacterWardrobeEditMaskDataUrl(baseSheet, sheetKind = "image") {
-  const sourceUrl = baseSheet?.localUrl || baseSheet?.url || "";
-  if (!sourceUrl || typeof document === "undefined") return "";
-  const image = await loadCanvasImage(sourceUrl);
-  const width = Math.max(1, Math.round(image.naturalWidth || image.width || 1));
-  const height = Math.max(1, Math.round(image.naturalHeight || image.height || 1));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) return "";
-  context.fillStyle = "#000";
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = "#fff";
-  characterWardrobeMaskRegions(sheetKind).forEach((region) => {
-    context.fillRect(
-      Math.round(region.x * width),
-      Math.round(region.y * height),
-      Math.ceil(region.width * width),
-      Math.ceil(region.height * height)
-    );
-  });
-  return canvas.toDataURL("image/png");
-}
-
 function characterSheetVariantForWardrobeId(data = {}, wardrobeId = "") {
   const targetId = wardrobeId || characterDefaultWardrobeId;
   const variants = Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [];
@@ -15882,6 +15870,7 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 function normalizeCurrentNode(node) {
   const nextNode = clearStaleRunningState(node);
   const data = nextNode.data || {};
+  if (nextNode.type === "editor") return { ...nextNode, data: { ...data, editorTimeline: normalizeEditorTimeline(data.editorTimeline), editorNodeWidth: normalizeEditorNodeWidth(data.editorNodeWidth), resultType: "video" } };
   if (nextNode.type === "myNewt") {
     const title = data.title === "My Newt" || !data.title ? nodeTypeLabel(nextNode.type) : data.title;
     return { ...nextNode, data: { ...myNewtDefaults, ...data, title } };

@@ -9,7 +9,6 @@ import {
   characterVideoNeutralBaseWardrobePrompt,
   characterVideoWardrobeEditPrompt,
   characterWardrobeEditPrompt,
-  characterWardrobeMaskRegions,
   characterWardrobeVariantIsCurrent,
   generateCharacterBaseSheets,
   upsertCharacterWardrobeVariant
@@ -21,10 +20,12 @@ test("the identity base uses a neutral reference garment instead of a designed w
   assert.match(characterNeutralBaseWardrobePrompt, /no nudity/i);
 });
 
-test("regular and CU foundations share the same men's swim trunks and women's one-piece instructions", () => {
+test("regular and CU foundations share men's swim trunks with a covered torso and women's one-piece instructions", () => {
   assert.equal(characterVideoNeutralBaseWardrobePrompt, characterNeutralBaseWardrobePrompt);
-  assert.match(characterNeutralBaseWardrobePrompt, /For a male character, use men's tight swim trunks with no top/);
-  assert.doesNotMatch(characterNeutralBaseWardrobePrompt, /Speedo|swim briefs/i);
+  assert.match(characterNeutralBaseWardrobePrompt, /For a male character, use men's tight swim trunks with a matching opaque, form-fitting tank top/);
+  assert.match(characterNeutralBaseWardrobePrompt, /fully covers the chest, abdomen, and back/);
+  assert.match(characterNeutralBaseWardrobePrompt, /Keep the same foundation clothing consistently across all views/);
+  assert.doesNotMatch(characterNeutralBaseWardrobePrompt, /Speedo|swim briefs|no top|shirtless|bare.chest/i);
   assert.match(characterNeutralBaseWardrobePrompt, /For a female character, use a one-piece swimsuit/);
   assert.match(characterNeutralBaseWardrobePrompt, /plain matte charcoal swimwear/);
   assert.match(characterNeutralBaseWardrobePrompt, /do not reframe a close-up/);
@@ -271,10 +272,12 @@ test("an explicit fresh build generates both independent masters and checkpoints
   assert.equal(result.baseVideoSignature, "cu");
 });
 
-test("wardrobe masks protect face regions while exposing clothing regions", () => {
-  const imageRegions = characterWardrobeMaskRegions("image");
-  const videoRegions = characterWardrobeMaskRegions("video");
-  assert.equal(imageRegions[0].y > 0, true);
-  assert.equal(imageRegions.some((region) => region.x > 0.45 && region.height < 0.2), true);
-  assert.deepEqual(videoRegions[0], { x: 0, y: 0, width: 0.5, height: 1 });
+test("wardrobe edits request a seamless complete layered outfit instead of partial patches", () => {
+  for (const prompt of [characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt]) {
+    assert.match(prompt, /single layered outfit, not a menu/);
+    assert.match(prompt, /If the reference includes a coat or jacket, keep it on in both body panels/);
+    assert.match(prompt, /Do not invent garments or accessories absent from the reference/);
+    assert.match(prompt, /complete, seamless sheet/);
+    assert.match(prompt, /never an isolated edit patch or pasted face cutouts/);
+  }
 });

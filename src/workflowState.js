@@ -41,6 +41,7 @@ export function resetCopiedNodeRuntime(data = {}) {
   const copy = { ...next };
   delete copy.myNewtProtection;
   delete copy.myNewtRunRecords;
+  if (data.editorExportJob) copy.editorExportJob = null;
   return data.jobId ? { ...copy, jobId: "", myNewtSummary: null } : copy;
 }
 
@@ -111,7 +112,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
     idMap.set(node.id, nextId);
     return {
       ...cloneNode(node),
-      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : cloneNode(node).data,
+      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : node.type === "editor" ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
       id: nextId,
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y)

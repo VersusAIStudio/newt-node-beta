@@ -54,11 +54,12 @@ export function useNewtPresets(adapter) {
       setItems((current) => current.filter((item) => item.id !== selected.id)); setSelectedId("");
     });
   };
-  const insertForAgent = async (id, replacements = {}) => {
+  const insertForAgent = async (id, replacements = {}, expectedRevision) => {
     if (operation.current) throw new Error("The preset library is busy.");
     const projectId = live.current.projectId;
     const preset = await newtPresetsApi.get(id);
     if (projectId !== live.current.projectId) throw new Error("Project changed before preset insertion.");
+    if (expectedRevision && preset.revision !== expectedRevision) throw new Error("The preset changed after Newt inspected it. Read the updated preset before inserting; no nodes were added.");
     return live.current.insert(preset.graph, replacements, { agent: true });
   };
   const insertGraphForAgent = (graph, options = {}) => {

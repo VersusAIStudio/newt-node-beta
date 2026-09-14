@@ -13,11 +13,11 @@
 }
 
 .node-workspace.outputs-open {
-  grid-template-columns: 180px minmax(0, 1fr) 116px;
+  grid-template-columns: 180px minmax(0, 1fr) clamp(116px, var(--output-drawer-width, 116px), min(480px, 40%));
 }
 
 .node-workspace.toolbar-collapsed.outputs-open {
-  grid-template-columns: minmax(0, 1fr) 116px;
+  grid-template-columns: minmax(0, 1fr) clamp(116px, var(--output-drawer-width, 116px), min(480px, 40%));
 }
 
 .node-toolbar {
@@ -82,6 +82,26 @@
 .outputs-restore:hover {
   background: rgba(221, 198, 49, 0.12);
 }
+
+.canvas-snap-toggle {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.68);
+  background: rgba(18, 18, 18, 0.86);
+}
+.canvas-snap-toggle:hover { background: #2c2a1c; }
+.canvas-snap-toggle[aria-pressed="true"] { color: #ddc631; border-color: #766922; background: #302d19; }
+.canvas-snap-toggle:focus-visible { outline: 2px solid #ddc631; outline-offset: 2px; }
 
 .project-tools {
   display: grid;
@@ -269,8 +289,10 @@
 }
 
 .project-output-drawer {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
   min-height: 0;
   padding: 8px;
   overflow: hidden;
@@ -278,6 +300,32 @@
   border-radius: 12px;
   background: rgba(18, 18, 18, 0.82);
 }
+
+.output-drawer-resize-handle {
+  position: absolute;
+  inset: 6px auto 6px 0;
+  width: 8px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.output-drawer-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 8px 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.output-drawer-resize-handle:hover::after,
+.output-drawer-resize-handle:focus-visible::after,
+.output-drawer-resize-handle.is-resizing::after {
+  background: #ddc631;
+}
+
+.output-drawer-resize-handle:focus-visible { outline: none; }
 
 .output-drawer-header {
   display: flex;
@@ -309,6 +357,7 @@
 
 .project-output-list {
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 8px;
   min-height: 0;
@@ -357,6 +406,8 @@
   color: rgba(244, 240, 232, 0.48);
   background: rgba(0, 0, 0, 0.22);
 }
+
+.project-output-placeholder { aspect-ratio: 1 / 1; }
 
 .project-output-kind {
   position: absolute;
@@ -940,6 +991,11 @@
   cursor: grabbing;
 }
 
+/* Canvas focus routes shortcuts; selections already provide the visual state. */
+.node-canvas:focus {
+  outline: none;
+}
+
 .node-scene {
   position: absolute;
   top: 0;
@@ -1034,6 +1090,10 @@
   position: absolute;
   z-index: 5;
   display: flex;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  overflow-x: auto;
   align-items: center;
   gap: 8px;
   min-height: 42px;
@@ -1049,6 +1109,8 @@
   transform: translateX(-50%);
   user-select: none;
 }
+
+.selection-action-bar > * { flex-shrink: 0; }
 
 .selection-action-divider {
   width: 1px;
@@ -1071,6 +1133,8 @@
   color: #f4f0e8;
   background: rgba(255, 255, 255, 0.07);
 }
+
+.selection-action-bar button.selection-arrange { width: 32px; height: 32px; padding: 0; justify-content: center; }
 
 .selection-action-bar button.selection-move-handle {
   width: 34px;
@@ -1206,47 +1270,6 @@
   background: #202020;
   box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.24);
   cursor: nwse-resize;
-}
-
-.zoom-controls {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 6;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.46);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
-}
-
-.zoom-controls button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 28px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 999px;
-  color: rgba(244, 240, 232, 0.68);
-  background: transparent;
-  font-size: 12px;
-  font-weight: 760;
-  text-align: center;
-  cursor: pointer;
-}
-
-.zoom-controls button:hover {
-  color: #f4f0e8;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.zoom-readout {
-  min-width: 54px;
 }
 
 .node-context-menu {
@@ -7923,6 +7946,8 @@ video.newtnode-video-fallback {
     max-height: 220px;
   }
 
+  .output-drawer-resize-handle { display: none; }
+
   .composer-modal {
     padding: 10px;
   }
@@ -7970,3 +7995,21 @@ video.newtnode-video-fallback {
 .my-newt-pair-code { font-family: monospace; overflow-wrap: anywhere; user-select: all; }
 .my-newt-remote-device { display: grid; grid-template-columns: 16px minmax(0, 1fr) 34px; align-items: center; gap: 8px; }
 .my-newt-remote-device span { overflow-wrap: anywhere; }
+.my-newt-skills-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 12px; }
+.newt-skills-backdrop { padding: 16px; }
+.newt-skills-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; box-sizing: border-box; border-radius: 8px; }
+.newt-skills-dialog header, .newt-skill-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.newt-skills-dialog header h2 { margin: 0; font-size: 20px; }
+.newt-skills-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: end; }
+.newt-skills-dialog label { display: grid; gap: 6px; font-size: 14px; }
+.newt-skills-dialog select, .newt-skills-dialog textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.newt-skills-dialog select { height: 40px; padding: 0 10px; color: #f1f1ed; background: #242424; border: 1px solid #484848; border-radius: 6px; }
+.newt-skills-dialog .newt-skill-enabled { display: flex; align-items: center; gap: 8px; padding-bottom: 10px; }
+.newt-skills-dialog .newt-skill-enabled input { width: 16px; height: 16px; accent-color: #ddc631; }
+.newt-skills-dialog textarea { height: min(360px, 42dvh); min-height: 160px; resize: vertical; font-size: 14px; line-height: 1.55; padding: 12px; background: #141414; color: #f1f1ed; border: 1px solid #484848; border-radius: 6px; }
+.newt-skill-meta, .newt-skills-dialog .newt-skill-scope { font-size: 12px; color: #bdbdb7; overflow-wrap: anywhere; }
+.newt-skills-dialog .workflow-prompt-actions button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; }
+.newt-skills-dialog .workflow-prompt-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.newt-skills-dialog p, .my-newt-workflow-basis { overflow-wrap: anywhere; }
+.newt-skill-error p { color: #ffa78b; }
+@media (max-width: 480px) { .newt-skills-controls { grid-template-columns: minmax(0, 1fr); gap: 8px; } .newt-skill-meta { flex-wrap: wrap; gap: 4px; } }

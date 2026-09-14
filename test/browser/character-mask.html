@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Character mask QA</title></head>
+<body style="background:#222;color:#eee;font:16px system-ui">
+  <h1>Character mask alpha checks</h1>
+  <output id="result">Checking...</output>
+  <script type="module">
+    import { paintCharacterWardrobeMask } from "/test/fixtures/legacyCharacterMasks.js";
+    const results = [];
+    for (const kind of ["image", "video"]) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 3840; canvas.height = 2160;
+      canvas.style.cssText = "display:block;width:640px;max-width:100%;height:auto;margin:16px 0;background:#557d89";
+      canvas.setAttribute("aria-label", `${kind} mask`);
+      const context = canvas.getContext("2d");
+      paintCharacterWardrobeMask(context, canvas.width, canvas.height, kind);
+      const image = new Image(); image.src = canvas.toDataURL("image/png"); await image.decode();
+      context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(image, 0, 0);
+      const alpha = (x, y) => context.getImageData(x, y, 1, 1).data[3];
+      const check = { kind, width: image.naturalWidth, height: image.naturalHeight,
+        body: alpha(320, 1300), face: alpha(2800, 420), neckline: alpha(2800, 2050), upperBody: alpha(320, 100) };
+      if (check.body !== 0 || check.face !== 255 || check.neckline !== 0 || check.upperBody !== (kind === "video" ? 0 : 255)) throw new Error(`Invalid ${kind} alpha mask`);
+      results.push(check); document.body.append(canvas);
+    }
+    document.getElementById("result").textContent = "PASS: " + JSON.stringify(results);
+  </script>
+</body>
+</html>

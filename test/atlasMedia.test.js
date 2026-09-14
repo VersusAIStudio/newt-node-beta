@@ -108,15 +108,18 @@ test("Sunburst/Flare preserve 4K, quality, alpha settings and base/wardrobe/mask
       assert.equal(body.size, "3840x2160");
       assert.equal(body.quality, quality);
       assert.equal(body.background, "transparent");
-      assert.equal(body.mask, url("mask.png"));
+      assert.equal(body.mask, url("edit-mask.png"));
       assert.deepEqual(body.images, [url("cu-base.png"), url("wardrobe.png")]);
       assert.equal(body.n, 1);
       assert.equal(result.size, "3840x2160");
       assert.equal(result.quality, quality);
-      assert.deepEqual(h.events, [["upload", "cu-base.png"], ["upload", "wardrobe.png"], ["upload", "mask.png"], ["generate", "image"]]);
-      for (const [index, original] of [base, wardrobe, mask].entries()) {
+      assert.deepEqual(h.events, [["upload", "cu-base.png"], ["upload", "wardrobe.png"], ["upload", "edit-mask.png"], ["generate", "image"]]);
+      for (const [index, original] of [base, wardrobe].entries()) {
         assert.equal(h.client.upload.mock.calls[index].arguments[0].buffer, original.buffer);
       }
+      assert.equal(result.maskedEdit.source, base.buffer);
+      assert.equal(result.maskedEdit.mask, h.client.upload.mock.calls[2].arguments[0].buffer);
+      assert.deepEqual(await sharp(result.maskedEdit.mask).raw().toBuffer(), await sharp(mask.buffer).raw().toBuffer());
     }
   }
 });

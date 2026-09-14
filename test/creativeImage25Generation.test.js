@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { nodeApi } from "../src/api/newtApi.js";
 import { assertCharacterOutputReferences } from "../src/characterSheetLibrary.js";
-import { coverageModelOptions, storyboardImageModelOptions, creativeImageDefaultModel } from "../src/modelOptions.js";
+import { coverageModelOptions, storyboardImageModelOptions, creativeImageDefaultModel, storyboardImageDefaultModel, imageModelNames } from "../src/modelOptions.js";
 import { coverageShotsForMethod, coveragePreviewItems } from "../src/coveragePresets.js";
 import { runCoverageGeneration, runCharacterSheetGeneration, runCharacterWardrobeEdit, runImageModelGeneration } from "../src/nodeRunners/mediaModels.js";
 import { normalizeStoryboardImageModel, storyboardImageSettings } from "../src/storyboardImageModels.js";
@@ -11,11 +11,15 @@ import { normalizeStoryboardImageModel, storyboardImageSettings } from "../src/s
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const storyboardHandler = source.slice(source.indexOf("  async function generateStoryboardNode("), source.indexOf("  async function reviewStoryboardGeneratedFrame("));
 
-test("specialized creative lists offer Sunburst first and exclude Flare", () => {
-  for (const choices of [coverageModelOptions, storyboardImageModelOptions]) {
-    assert.equal(choices[0], creativeImageDefaultModel);
-    assert.ok(!choices.some((model) => model.includes("Flare")));
-  }
+test("Storyboard offers Flare first without changing Coverage's Sunburst default", () => {
+  assert.equal(storyboardImageDefaultModel, imageModelNames.openAiImage25Flare);
+  assert.deepEqual(storyboardImageModelOptions, [storyboardImageDefaultModel, creativeImageDefaultModel, imageModelNames.openAiImage2]);
+  assert.equal(coverageModelOptions[0], creativeImageDefaultModel);
+  assert.ok(!coverageModelOptions.includes(storyboardImageDefaultModel));
+  assert.equal(normalizeStoryboardImageModel(), storyboardImageDefaultModel);
+  assert.equal(normalizeStoryboardImageModel("unknown"), storyboardImageDefaultModel);
+  assert.equal(storyboardImageSettings().model, storyboardImageDefaultModel);
+  for (const model of storyboardImageModelOptions) assert.equal(normalizeStoryboardImageModel(model), model);
 });
 
 for (const provider of ["fal", "krea", "atlas"]) {
@@ -40,54 +44,56 @@ for (const provider of ["fal", "krea", "atlas"]) {
     assert.ok(preview.every((item) => item.url.startsWith("/outputs/")));
   });
 
-  test(`${provider} Storyboard character preparation uses Sunburst with supported dimensions`, async (t) => {
-    const generate = t.mock.method(nodeApi, "generateImage", async () => ({ response: { ok: true }, data: { image: { localUrl: "/sheet.png" } } }));
-    await runCharacterSheetGeneration({ node: { id: "board", type: "storyboard", data: { model: creativeImageDefaultModel } }, prompt: "Preserve storyboard line art", portrait: { localUrl: "/portrait.png" }, characterTag: "Emma", provider });
-    const body = generate.mock.calls[0].arguments[0];
-    assert.equal(body.model, creativeImageDefaultModel);
-    assert.equal(body.quality, "high");
-    assert.equal(body.resolution, provider !== "krea" ? "4K" : "1K");
-    assert.equal(body.aspectRatio, provider !== "krea" ? "16:9" : "3:2");
-    assert.deepEqual(body.imagePromptUrls, ["/portrait.png"]);
-  });
-
-  test(`${provider} real Storyboard generation and its QC retry keep Sunburst and frame references`, async (t) => {
-    const node = { id: "board", type: "storyboard", data: { model: creativeImageDefaultModel, resolution: "1K", aspectRatio: "16:9", storyboardFrames: [{ id: "one", number: 1, prompt: "Walk to the door" }] } };
-    const nodesRef = { current: [node] };
-    const updateNode = (_id, patch) => { node.data = { ...node.data, ...patch }; };
-    const generate = t.mock.method(nodeApi, "generateImage", async () => ({ response: { ok: true }, data: { image: { localUrl: "/frame.png" } } }));
-    let reviews = 0;
-    const deps = {
-      nodesRef, edgesRef: { current: [] }, generationProvider: provider, storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertCharacterOutputReferences,
-      buildIncomingByNode: () => ({}), expandStoryboardDirectorIncoming: (incoming) => incoming,
-      normalizedStoryboardFrames: (frames) => frames, storyboardSceneDescriptionForNode: () => "The character walks to the door", storyboardPlanIsCurrent: () => true,
-      updateNode, workflowRequestContext: () => ({}), connectedDirectorPackageSource: () => null,
-      ensureStoryboardCharactersReady: async () => node,
-      storyboardNodeWithMostPreparedCharacters: (_prepared, state) => state,
-      storyboardAspectRatioForNode: (current) => current.data.aspectRatio, storyboardResolutionForNode: (current) => current.data.resolution,
-      patchStoryboardFrame: (_id, frameId, patch) => { node.data.storyboardFrames = node.data.storyboardFrames.map((frame) => frame.id === frameId ? { ...frame, ...patch } : frame); },
-      storyboardContinuityReferenceItems: () => [{ url: "/previous.png", label: "PREVIOUS_FRAME.png" }],
-      storyboardRequiredCharacterSourcesForFrame: () => [], storyboardCharacterSourcesForNode: () => [], storyboardSceneReferenceSources: () => [],
-      storyboardRequiredLocationSourcesForFrame: () => [], storyboardPropReferenceSources: () => [], storyboardRequiredPropSourcesForFrame: () => [],
-      storyboardImagePromptItems: () => [{ url: "/identity.png", label: "Emma" }], storyboardImagePromptItemsForFrame: (base, previous) => [...base, ...previous],
-      storyboardMissingRequiredCharacterTags: () => [], buildStoryboardFramePrompt: () => "Draw the planned frame with the reference character",
-      storyboardPreviousFrameLabel: "PREVIOUS_FRAME.png", storyboardSpatialAnchorLabel: "SPATIAL_ANCHOR.png",
-      reviewStoryboardGeneratedFrame: async () => ({ pass: ++reviews > 1, shouldRetry: reviews === 1 }), storyboardQcRetryPrompt: (prompt) => `${prompt}. Correct the eyeline.`,
-      exportStoryboardFrameResult: async () => ({ url: "/export.png" }), updateStoryboardNodeFrames: (_id, frames, patch) => updateNode("board", { storyboardFrames: frames, ...patch }), loadOutputHistory: () => {}
-    };
-    const run = new Function(...Object.keys(deps), `${storyboardHandler}\nreturn generateStoryboardNode;`)(...Object.values(deps));
-    assert.equal((await run(node)).status, "complete");
-    assert.equal(generate.mock.callCount(), 2);
-    for (const call of generate.mock.calls) {
-      const body = call.arguments[0];
-      assert.equal(body.model, creativeImageDefaultModel);
+  for (const model of [storyboardImageDefaultModel, creativeImageDefaultModel]) {
+    test(`${provider} Storyboard character preparation keeps ${model} with supported dimensions`, async (t) => {
+      const generate = t.mock.method(nodeApi, "generateImage", async () => ({ response: { ok: true }, data: { image: { localUrl: "/sheet.png" } } }));
+      await runCharacterSheetGeneration({ node: { id: "board", type: "storyboard", data: { model } }, prompt: "Preserve storyboard line art", portrait: { localUrl: "/portrait.png" }, characterTag: "Emma", provider });
+      const body = generate.mock.calls[0].arguments[0];
+      assert.equal(body.model, model);
       assert.equal(body.quality, "high");
-      assert.equal(body.resolution, "1K");
+      assert.equal(body.resolution, provider !== "krea" ? "4K" : "1K");
       assert.equal(body.aspectRatio, provider !== "krea" ? "16:9" : "3:2");
-      assert.deepEqual(body.imagePromptUrls, ["/identity.png", "/previous.png"]);
-    }
-    assert.equal(node.data.storyboardFrames[0].qcRetryCount, 1);
-  });
+      assert.deepEqual(body.imagePromptUrls, ["/portrait.png"]);
+    });
+
+    test(`${provider} real Storyboard generation and its QC retry keep ${model} and frame references`, async (t) => {
+      const node = { id: "board", type: "storyboard", data: { model, resolution: "1K", aspectRatio: "16:9", storyboardFrames: [{ id: "one", number: 1, prompt: "Walk to the door" }] } };
+      const nodesRef = { current: [node] };
+      const updateNode = (_id, patch) => { node.data = { ...node.data, ...patch }; };
+      const generate = t.mock.method(nodeApi, "generateImage", async () => ({ response: { ok: true }, data: { image: { localUrl: "/frame.png" } } }));
+      let reviews = 0;
+      const deps = {
+        nodesRef, edgesRef: { current: [] }, generationProvider: provider, storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertCharacterOutputReferences,
+        buildIncomingByNode: () => ({}), expandStoryboardDirectorIncoming: (incoming) => incoming,
+        normalizedStoryboardFrames: (frames) => frames, storyboardSceneDescriptionForNode: () => "The character walks to the door", storyboardPlanIsCurrent: () => true,
+        updateNode, workflowRequestContext: () => ({}), connectedDirectorPackageSource: () => null,
+        ensureStoryboardCharactersReady: async () => node,
+        storyboardNodeWithMostPreparedCharacters: (_prepared, state) => state,
+        storyboardAspectRatioForNode: (current) => current.data.aspectRatio, storyboardResolutionForNode: (current) => current.data.resolution,
+        patchStoryboardFrame: (_id, frameId, patch) => { node.data.storyboardFrames = node.data.storyboardFrames.map((frame) => frame.id === frameId ? { ...frame, ...patch } : frame); },
+        storyboardContinuityReferenceItems: () => [{ url: "/previous.png", label: "PREVIOUS_FRAME.png" }],
+        storyboardRequiredCharacterSourcesForFrame: () => [], storyboardCharacterSourcesForNode: () => [], storyboardSceneReferenceSources: () => [],
+        storyboardRequiredLocationSourcesForFrame: () => [], storyboardPropReferenceSources: () => [], storyboardRequiredPropSourcesForFrame: () => [],
+        storyboardImagePromptItems: () => [{ url: "/identity.png", label: "Emma" }], storyboardImagePromptItemsForFrame: (base, previous) => [...base, ...previous],
+        storyboardMissingRequiredCharacterTags: () => [], buildStoryboardFramePrompt: () => "Draw the planned frame with the reference character",
+        storyboardPreviousFrameLabel: "PREVIOUS_FRAME.png", storyboardSpatialAnchorLabel: "SPATIAL_ANCHOR.png",
+        reviewStoryboardGeneratedFrame: async () => ({ pass: ++reviews > 1, shouldRetry: reviews === 1 }), storyboardQcRetryPrompt: (prompt) => `${prompt}. Correct the eyeline.`,
+        exportStoryboardFrameResult: async () => ({ url: "/export.png" }), updateStoryboardNodeFrames: (_id, frames, patch) => updateNode("board", { storyboardFrames: frames, ...patch }), loadOutputHistory: () => {}
+      };
+      const run = new Function(...Object.keys(deps), `${storyboardHandler}\nreturn generateStoryboardNode;`)(...Object.values(deps));
+      assert.equal((await run(node)).status, "complete");
+      assert.equal(generate.mock.callCount(), 2);
+      for (const call of generate.mock.calls) {
+        const body = call.arguments[0];
+        assert.equal(body.model, model);
+        assert.equal(body.quality, "high");
+        assert.equal(body.resolution, "1K");
+        assert.equal(body.aspectRatio, provider !== "krea" ? "16:9" : "3:2");
+        assert.deepEqual(body.imagePromptUrls, ["/identity.png", "/previous.png"]);
+      }
+      assert.equal(node.data.storyboardFrames[0].qcRetryCount, 1);
+    });
+  }
 }
 
 test("unsupported Krea Character Sunburst never makes a paid base or wardrobe request", async (t) => {

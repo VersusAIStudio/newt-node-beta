@@ -1,4 +1,5 @@
-import { ATLAS_PRICING_URL, atlasPricingEndpoints, atlasPricingSpecs, atlasPriceRows, atlasPricingEntry } from "../src/atlasPricing.js";
+import { ATLAS_PRICING_URL, atlasPricingEndpoints, atlasPricingSpecs, atlasPriceRows, atlasPricingEntry,
+  atlasSeedanceEstimateEndpoints, atlasSeedanceEstimateEntry, atlasSeedanceEstimateRates } from "../src/atlasPricing.js";
 import { validatePricingEntry } from "./pricing-sources.js";
 import { atlasLlmRates } from "../src/atlasLlmPricing.js";
 
@@ -31,6 +32,10 @@ export function parseAtlasPricing(data) {
     if (matches.length !== 1) return { ...result, issue: "Atlas standard route is missing or ambiguous; existing estimate retained." };
     const model = matches[0], spec = atlasPricingSpecs[endpoint];
     const observed = { priceVersion: model.price_version, billingCategory: model.billing_category };
+    if (atlasSeedanceEstimateEndpoints.includes(endpoint)) {
+      try { return { ...result, observed, entry: parseSeedanceEstimate(model) }; }
+      catch (error) { return { ...result, observed, issue: error.message }; }
+    }
     if (!spec) return { ...result, observed, issue: "Atlas published runtime/token pricing requires review; no fixed estimate applied." };
     try {
       const parameters = spec.kind === "image" ? ["resolution", "num_images", "enable_web_search", ...(spec.imageSearch ? ["enable_image_search"] : [])]
@@ -60,6 +65,31 @@ export function parseAtlasPricing(data) {
     } catch (error) { return { ...result, observed, issue: error.message }; }
   });
   return [...media, ...parseAtlasLlmPricing(data)];
+}
+
+function parseSeedanceEstimate(model) {
+  const reference = model.id.endsWith("/reference-to-video");
+  const finalRule = "The final charge uses actual completion tokens after the task finishes.";
+  const lines = reference ? [
+    "Per-second rates assume no reference-video input and derive from $17.3875 per 1M video tokens.",
+    "Requests with reference videos bill every token \u2014 output plus reference video \u2014 at $10.4 per 1M video tokens; use View for an exact quote.", finalRule
+  ] : ["The displayed rate is an estimate derived from video tokens.", finalRule];
+  if (model.display !== true || model.type !== "video" || model.billing_category !== "video_token_postpaid"
+    || model.billing_mode !== "token_postpaid" || model.pricing_mode !== (reference ? "runtime_estimate" : "per_second") || model.requires_runtime_quote !== true
+    || (model.currency != null && model.currency !== "USD") || !/^sha256:[a-f0-9]{64}$/.test(model.price_version)
+    || !Array.isArray(model.pricing_params) || sorted(model.pricing_params) !== sorted(["duration", "resolution"])
+    || !Array.isArray(model.billing_explanation?.lines) || ruleText(model.billing_explanation.lines) !== ruleText(lines)
+    || !Array.isArray(model.price_rows) || model.price_rows.length !== model.price_count) throw new Error("Atlas Seedance estimate rules changed; review required.");
+  const rates = {};
+  for (const resolution of Object.keys(atlasSeedanceEstimateRates)) {
+    const matches = model.price_rows.filter(row => row.row_id === resolution), row = matches[0];
+    if (matches.length !== 1 || row.billing_unit !== "/s (estimated)" || row.estimated !== true || row.requires_quote !== true
+      || !equalRecord(row.quote_defaults, { duration: 5, resolution }) || row.price_role != null
+      || typeof row.official_price !== "string" || !/^\d+(?:\.\d+)?$/.test(row.official_price)) throw new Error("Atlas Seedance estimated price tiers changed; review required.");
+    rates[resolution] = Number(row.official_price);
+  }
+  const entry = validatePricingEntry(atlasSeedanceEstimateEntry(rates), atlasSeedanceEstimateEntry());
+  return { ...entry, sourcePriceVersion: model.price_version };
 }
 
 export function parseAtlasLlmPricing(data) {

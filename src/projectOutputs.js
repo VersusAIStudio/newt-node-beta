@@ -17,7 +17,7 @@ export function buildProjectOutputItems({
   nodes.forEach((node) => {
     const type = getNodeResultMediaType?.(node) || "";
     if (!type) return;
-    normalizedResultItems(node.data.resultItems, node.data.resultUrl, type)
+    [...normalizedResultItems(node.data.resultItems, node.data.resultUrl, type), ...(node.type === "editor" ? node.data.editorStills || [] : [])]
       .filter((item) => isLocalOutputUrl(item.url))
       .forEach((item, index) => {
         addProjectOutput(outputMap, {

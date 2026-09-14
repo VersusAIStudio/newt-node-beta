@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "skills": [
+    { "id": "workflow-planning", "version": "1.0.1", "title": "Workflow Planning", "scope": "All creative workflow tasks" },
+    { "id": "cinematic-narrative", "version": "1.0.0", "title": "Cinematic Narrative", "scope": "Narrative scenes and cinematic storytelling, only when relevant to the brief" },
+    { "id": "asset-selection", "version": "1.0.1", "title": "Asset Selection and Review", "scope": "Tasks that choose or create visual references" },
+    { "id": "canvas-organization", "version": "1.0.0", "title": "Canvas Organization", "scope": "Layout and cleanup of Newt-created work" }
+  ]
+}

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Newt skills narrow layout QA</title>
+    <style>body { margin: 12px; background: #080808; color: #eee; font: 14px system-ui; } button { padding: 8px; margin-bottom: 8px; } iframe { display: block; width: 390px; height: 780px; border: 1px solid #555; }</style>
+  </head>
+  <body>
+    <button id="open">Open narrow skill editor</button>
+    <button id="small">320px viewport</button>
+    <iframe title="390px skills viewport" src="/test/browser/newt-skills.html"></iframe>
+    <script type="module">
+      const frame = document.querySelector("iframe");
+      document.querySelector("#open").onclick = () => frame.contentDocument.querySelector(".my-newt-skills-button").click();
+      document.querySelector("#small").onclick = () => { frame.style.width = "320px"; frame.title = "320px skills viewport"; };
+    </script>
+  </body>
+</html>

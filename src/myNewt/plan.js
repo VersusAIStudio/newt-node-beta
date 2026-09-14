@@ -2,6 +2,14 @@ import { estimateImageRunCost, estimateVideoRunCost } from "../generationPricing
 import { snapshotAssetUrls } from "./contract.js";
 
 export function normalizeMyNewtPlan(value = {}, provider = "fal") {
+  let workflowBasis;
+  if (value.workflowBasis != null) {
+    const basis = value.workflowBasis;
+    if (!["presets", "existing", "custom"].includes(basis.mode) || typeof basis.reason !== "string" || !basis.reason.trim()) throw new Error("Explain whether the workflow uses saved presets, existing work, or a custom layout.");
+    const presetIds = Array.isArray(basis.presetIds) ? [...new Set(basis.presetIds.filter(id => typeof id === "string" && id.length <= 80))].slice(0, 12) : [];
+    if (basis.mode === "presets" && !presetIds.length) throw new Error("List the saved presets selected for the workflow.");
+    workflowBasis = { mode: basis.mode, reason: basis.reason.slice(0, 1000), presetIds: basis.mode === "presets" ? presetIds : [] };
+  }
   if (!String(value.summary || "").trim()) throw new Error("A plan needs a short summary.");
   if (!Array.isArray(value.steps) || !value.steps.length || value.steps.length > 30) throw new Error("A plan needs 1 to 30 steps.");
   if (!Array.isArray(value.deliverables) || !value.deliverables.length || value.deliverables.length > 30) throw new Error("Describe the expected deliverables before working.");
@@ -22,7 +30,7 @@ export function normalizeMyNewtPlan(value = {}, provider = "fal") {
     const amount = run.kind === "image" ? estimateImageRunCost(settings) : run.kind === "video" && !/auto/i.test(String(run.duration)) ? estimateVideoRunCost(settings) : null;
     return { kind: run.kind, model: String(run.model || ""), count: Math.max(1, Math.min(100, Number(run.batchCount) || 1)), estimatedCost: amount };
   });
-  return { summary: String(value.summary).slice(0, 2000), steps, deliverables, runs, estimatedGenerationCost: runs.some((run) => run.estimatedCost == null) ? null : runs.reduce((sum, run) => sum + run.estimatedCost, 0), approved: false };
+  return { summary: String(value.summary).slice(0, 2000), ...(workflowBasis ? { workflowBasis } : {}), steps, deliverables, runs, estimatedGenerationCost: runs.some((run) => run.estimatedCost == null) ? null : runs.reduce((sum, run) => sum + run.estimatedCost, 0), approved: false };
 }
 
 export function myNewtOutputItems(node) {
@@ -68,3 +76,12 @@ export function verifyMyNewtPlan(snapshot, plan, { baselineUrls = [], message = 
 }
 
 export function myNewtBaselineUrls(snapshot) { return [...snapshotAssetUrls(snapshot)]; }
+
+export function myNewtDeliverableProgress(snapshot, plan, baselineUrls = []) {
+  if (!plan?.approved) return [];
+  return plan.deliverables.map(item => {
+    const result = verifyMyNewtPlan(snapshot, { ...plan, deliverables: [item] }, { baselineUrls });
+    return { label: item.label, nodeId: item.nodeId, nodeTitle: item.nodeTitle, complete: result.ok,
+      outputs: result.outputs, problems: result.problems };
+  });
+}

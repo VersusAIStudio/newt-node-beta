@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { myNewtApi } from "../api/newtApi.js";
 import { myNewtInputSignature, myNewtLocalActionSignature, myNewtSettings, myNewtSnapshot, snapshotAssetUrls, validateMyNewtPatch } from "./contract.js";
+import { assertMyNewtCanvasAction, myNewtCanvasOperations, myNewtCanvasSignature } from "./canvasActions.js";
 import { withMyNewtRequestScope } from "./requestScope.js";
 import { notifyGenerationTaskComplete } from "../generationChime.js";
 import { createMyNewtCompletionTracker, MY_NEWT_BURST_MS, myNewtTaskKey } from "./completion.js";
@@ -118,6 +119,10 @@ export function useMyNewt(adapter) {
       const graph = a.getGraph();
       const p = action.payload || {};
       assertMyNewtProtection(graph, action, { local: task.execution === "local" });
+      if (myNewtCanvasOperations.includes(action.operation)) {
+        assertMyNewtCanvasAction(graph, action, task);
+        if (myNewtCanvasSignature(action.expected, action) !== myNewtCanvasSignature(snapshot(), action)) throw new Error("Canvas work changed after planning. Read the current project before organizing it.");
+      }
       if ((task.execution === "local" || action.operation === "protect") && myNewtLocalActionSignature(action.expected, action) !== myNewtLocalActionSignature(snapshot(), action)) throw new Error("The project or referenced nodes changed after planning. Start a fresh command using the current project.");
       const node = graph.nodes.find((item) => item.id === p.nodeId);
       const guard = (target, allowLockedRun = false) => {
@@ -144,13 +149,16 @@ export function useMyNewt(adapter) {
         a.renameProject(p.name); result = { renamed: true };
       } else if (action.operation === "report" && task.execution === "local") {
         result = { reported: true };
+      } else if (action.operation === "arrange") {
+        result = a.arrange(p.nodeIds, task.layoutBlocks || []);
+      } else if (action.operation === "cleanup") {
+        result = a.cleanup(p.nodeIds);
       } else if (action.operation === "create") {
         if (!a.catalog.some((entry) => entry.type === p.type) || p.type === "myNewt") throw new Error("Choose a supported node type from the catalog.");
         const created = await a.create(p.type, p);
         result = { createdId: created.id };
       } else if (action.operation === "preset") {
-        if (!a.presets.some((preset) => preset.id === p.presetId)) throw new Error("Choose an existing Newt Preset from the library.");
-        result = await a.insertPreset(p.presetId, p.bindings || {});
+        result = await a.insertPreset(p.presetId, p.bindings || {}, p.presetRevision);
       } else if (action.operation === "update") {
         guard(node);
         if (task.execution === "local") validateLocalUpdate(node, p.patch, graph, permissions, task.createdIds);
@@ -187,7 +195,7 @@ export function useMyNewt(adapter) {
           const reply = await myNewtApi.request(id, { ...owner, actionId: action.id, clientId: clientId.current, sequence, route, body });
           return { response: { ok: reply.status >= 200 && reply.status < 300, status: reply.status }, data: reply.data };
         }, () => a.run(node, p.stage));
-        if (task.newIds?.includes(node.id)) await a.settlePlacement(node.id);
+        if (task.newIds?.includes(node.id) && !task.layoutBlocks?.some(block => block.includes(node.id))) await a.settlePlacement(node.id);
         await new Promise((resolve) => setTimeout(resolve, 100));
         const latest = a.getGraph().nodes.find((item) => item.id === node.id);
         const runError = latest?.data.error || outcome?.error?.message || (typeof outcome?.error === "string" ? outcome.error : "") || (outcome?.status === "error" ? "The node run did not complete." : "");

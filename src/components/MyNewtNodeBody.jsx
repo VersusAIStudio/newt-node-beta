@@ -10,6 +10,7 @@ import { MyNewtTaskDetails } from "./MyNewtTaskDetails.jsx";
 import { newtPresetDisplayName } from "../myNewt/presets.js";
 import { MyNewtRemoteSettings } from "./MyNewtRemoteSettings.jsx";
 import { imageModelOptions, videoModelOptions } from "../modelOptions.js";
+import { NewtSkillsEditor } from "./NewtSkillsEditor.jsx";
 
 export function MyNewtNodeBody({ node, config, incoming, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys, controller }) {
   const [voiceMessage, setVoiceMessage] = useState({ scope: "", text: "" });
@@ -98,6 +99,7 @@ export function MyNewtNodeBody({ node, config, incoming, onUpdate, onConnectStar
       <label>Step limit<input type="number" min="1" max="100" value={settings.maxSteps} onChange={(event) => patch({ maxSteps: Number(event.target.value) })} /></label>
       <label>Time limit (minutes)<input type="number" min="1" max="240" value={settings.maxMinutes} onChange={(event) => patch({ maxMinutes: Number(event.target.value) })} /></label>
       <details className="my-newt-advanced"><summary>Advanced</summary><div className="my-newt-review-settings">
+        <NewtSkillsEditor />
         {[["favoriteImageModel", "Favorite image model", imageModelOptions, controller?.modelOptions?.image], ["favoriteVideoModel", "Favorite video model", videoModelOptions, controller?.modelOptions?.video]].map(([key, label, models, enabledModels = models]) => <label className="my-newt-favorite-model" key={key} title="Preferred for new compatible nodes only. Existing nodes, workflow presets, and explicitly requested models stay unchanged.">
           <span>{label}</span><select aria-label={label} value={settings[key]} onChange={(event) => patch({ [key]: event.target.value })}>
             <option value="">No preference</option>
@@ -105,6 +107,8 @@ export function MyNewtNodeBody({ node, config, incoming, onUpdate, onConnectStar
           </select>
         </label>)}
         <label title="Automatically proceed through plans and runs within your budget and permissions. Missing requirements and uncertain provider charges still pause the task."><input type="checkbox" checked={settings.autoReview} onChange={(event) => patch({ autoReview: event.target.checked })} />Auto Review</label>
+        <label title="Allow image and video requests without a price estimate. Unknown charges are tracked separately, so the total budget cannot be guaranteed. Known-cost limits and interrupted-run protections still apply."><input type="checkbox" checked={settings.allowUnpricedGenerations} onChange={(event) => patch({ allowUnpricedGenerations: event.target.checked })} />Allow Unpriced Generations</label>
+        {settings.allowUnpricedGenerations && <p className="my-newt-message" role="status">Unknown charges are not included in the budget. Total spend may exceed it.</p>}
         {[["approvePlan", "Approve workflow plan"], ["approveRuns", "Approve each node run"]].map(([key, label]) => <label key={key} className={settings.autoReview ? "my-newt-review-disabled" : undefined}><input type="checkbox" checked={!settings.autoReview && settings[key]} disabled={settings.autoReview} onChange={(event) => patch({ [key]: event.target.checked })} />{label}</label>)}
       </div></details>
     </div></details>

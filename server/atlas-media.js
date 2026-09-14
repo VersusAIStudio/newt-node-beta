@@ -4,6 +4,7 @@ import { estimateAtlasImageCost, estimateAtlasVideoCost } from "../src/atlasPric
 import { imageModelNames } from "../src/modelOptions.js";
 import { isOpenAiImage25Model } from "../src/openAiImage25.js";
 import sharp from "sharp";
+import { normalizeOpenAiEditMask } from "./openai-edit-mask.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets = async () => {} }) {
   async function image({ model, prompt, imageInputs = [], aspectRatio, resolution = "2K", quality = "high", background = "auto", editMaskInput, size: explicitSize }, key) {
@@ -23,6 +24,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
       if (mask.format !== "png" || mask.width !== source.width || mask.height !== source.height) {
         throw Object.assign(new Error("Atlas Cloud needs a PNG mask with the same dimensions as the first reference image."), { status: 400 });
       }
+      editMaskInput = await normalizeOpenAiEditMask(editMaskInput, imageInputs[0]);
     }
     const cost = estimateAtlasImageCost({ ...options, referenceCount: imageInputs.length });
     const images = [];
@@ -32,6 +34,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     const result = await client.generate({ mediaType: "image", input, key });
     return { ...result, endpoint: input.model, provider: "Atlas Cloud", cost,
       remoteImage: { url: result.url, content_type: "image/png" },
+      maskedEdit: editMaskInput ? { source: imageInputs[0].buffer, mask: editMaskInput.buffer } : null,
       size, quality: input.quality || quality, resolution, submittedPrompt, resultText: "" };
   }
 

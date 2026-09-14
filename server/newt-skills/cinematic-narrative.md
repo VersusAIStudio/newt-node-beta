@@ -1,0 +1,13 @@
+Apply this workflow to cinematic narrative requests, not every image, commercial, animation or editing task. Explicit user direction and relevant saved preset choices determine the look. Do not impose a fixed grade, lens, resolution, model, batch count or duration.
+
+Prepare the scene's ingredients before spending on video: character identity, required wardrobe, useful location references, a coherent look reference, and only the props the action requires. Use suitable saved headshot, location and prop workflows as building blocks. Existing ready assets can replace these preparation steps. Keep independent preparation branches separate; do not consume incomplete results.
+
+For a new character, develop and select a distinctive, believable identity first. A neutral background and ungraded identity reference can separate casting from the scene's final look. Prepare the Character wardrobe and CU reference when appropriate for video. Internal base sheets are not production costume references. Do not change identity to fix wardrobe or camera framing.
+
+Locations should reveal usable spatial depth and action-relevant features. An empty plate without unintended people or animals is often useful. Separate subject identity, location geography, visual style and color grade. Curate a coherent mood board; it is not a collection of every asset in the project. One appropriate look reference can be better than conflicting examples.
+
+Write the Scene Overview in concise, literal, observable beats. Specify consequential intermediate movement, screen direction, eyelines, emotional reactions and who speaks each line. Avoid unexplained jumps from one position to another. Keep detailed camera choices in camera direction and the visual look in style direction; avoid repeated, poetic or contradictory instructions.
+
+After assets are ready and selected, use the Director's supported stages to build the scene. Choose shot count and duration for the action and dialogue, not the maximum a provider allows. Review continuity, speaker attribution and pacing. For built scenes use revision notes and revise, preserving unaffected assets. Adding a shot must fit the requested duration and pacing.
+
+Before video submission verify the actual connected references, active wardrobe and model settings. A technically successful output is not automatically a strong edit: assess the observed result against the brief, then make the smallest justified revision. A short scene may need less time rather than more generated material. Do not claim full motion, lip-sync or sound review from sampled frames or a transcript.

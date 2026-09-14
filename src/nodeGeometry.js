@@ -1,4 +1,18 @@
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
+export const outputDrawerWidthLimits = { default: 116, min: 116, max: 480 };
+
+export function outputDrawerMaxWidth(workspaceWidth) {
+  return Math.floor(clamp(positiveDimension(workspaceWidth, 1200) * 0.4, outputDrawerWidthLimits.min, outputDrawerWidthLimits.max));
+}
+
+export function normalizeOutputDrawerWidth(value, maxWidth = outputDrawerWidthLimits.max) {
+  const limit = clamp(positiveDimension(maxWidth, outputDrawerWidthLimits.max), outputDrawerWidthLimits.min, outputDrawerWidthLimits.max);
+  return Math.round(clamp(positiveDimension(value, outputDrawerWidthLimits.default), outputDrawerWidthLimits.min, limit));
+}
+
+export function normalizeEditorNodeWidth(value) {
+  return Math.round(clamp(positiveDimension(value, 1100), 720, 3200));
+}
 export const plainTextNodeSizeLimits = {
   defaultWidth: 310,
   defaultHeight: 206,
@@ -34,6 +48,7 @@ export function resizePlainTextNode(startSize = {}, delta = {}) {
 }
 
 export function estimatedNodeWidth(type) {
+  if (type === "editor") return 1100;
   if (type === "myNewt") return 410;
   if (type === "frameIt") return 980;
   if (type === "autoAspect") return 390;
@@ -48,6 +63,7 @@ export function estimatedNodeWidth(type) {
 }
 
 export function estimatedNodeHeight(type) {
+  if (type === "editor") return 470;
   if (type === "myNewt") return 650;
   if (type === "frameIt") return 700;
   if (type === "character") return 520;
@@ -67,7 +83,7 @@ export function estimatedNodeRect(node, padding = 0) {
   return {
     left: Number(node?.x || 0) - padding,
     top: Number(node?.y || 0) - padding,
-    right: Number(node?.x || 0) + (plainTextSize?.width || estimatedNodeWidth(node?.type) * storyboardScale) + padding,
+    right: Number(node?.x || 0) + (node?.type === "editor" ? normalizeEditorNodeWidth(node.data?.editorNodeWidth) : plainTextSize?.width || estimatedNodeWidth(node?.type) * storyboardScale) + padding,
     bottom: Number(node?.y || 0) + (plainTextSize?.height || estimatedNodeHeight(node?.type)) + padding
   };
 }

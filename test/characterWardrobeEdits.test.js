@@ -86,7 +86,8 @@ for (const model of characterSheetModelOptions) {
     assert.equal(request.model, model);
     assert.equal(request.resolution, "4K");
     assert.equal(request.aspectRatio, "16:9");
-    assert.equal(request.editMaskDataUrl, options.editMaskDataUrl);
+    assert.equal(request.editMaskDataUrl, undefined, "Obsolete rectangle masks must not be sent, even by older callers");
+    assert.equal(request.characterWardrobeEdit, true);
     assert.equal(request.workflowPackagePath, "/projects/production");
     assert.equal(request.nodeId, "character-1");
     assert.equal(result.url, "/outputs/dressed-cu.png");
@@ -130,6 +131,8 @@ test("regular wardrobe edits retain their existing two-reference workflow", asyn
   assert.deepEqual(request.imagePromptUrls, ["/outputs/regular-base.png", "/uploads/outfit.png"]);
   assert.equal(request.prompt, characterWardrobeEditPrompt);
   assert.equal(request.imagePromptLabels[0], "Locked Base Identity Character Sheet");
+  assert.equal(request.editMaskDataUrl, undefined);
+  assert.equal(request.characterWardrobeEdit, true);
 });
 
 test("multiple CU wardrobe edits reuse the saved CU base without regenerating either base", async (t) => {

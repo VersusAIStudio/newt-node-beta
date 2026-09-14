@@ -71,7 +71,7 @@ function editor(t, data, { failAt = 0, error = "Provider rejected the request." 
     characterSheetPrompt: "Regular base", cinematicCharacterSheetPrompt: "Cinematic regular base",
     characterVoicePrompt: "", characterTraitPrompt: () => "", activeCharacterVoice: () => null,
     characterTag: () => "Emma", workflowRequestContext: () => ({}), pushUndoSnapshot: () => {},
-    createCharacterWardrobeEditMaskDataUrl: async () => "data:image/png;base64,dGVzdA==",
+    createCharacterWardrobeEditMaskDataUrl: () => assert.fail("Character must not create static masks"),
     updateNode: (_id, patch) => {
       if (patch.characterBatchProgress) progress.push(patch.characterBatchProgress);
       node = { ...node, data: { ...node.data, ...patch } };
@@ -138,6 +138,12 @@ test("real Regenerate Base rebuilds both masters from the portrait and all wardr
   assert.deepEqual(requests.slice(0, 2).map((request) => request.imagePromptUrls), [
     ["/uploads/portrait.png"], ["/uploads/portrait.png"]
   ]);
+  for (const request of requests.slice(0, 2)) {
+    assert.match(request.prompt, /men's tight swim trunks with a matching opaque, form-fitting tank top/);
+    assert.match(request.prompt, /fully covers the chest, abdomen, and back/);
+    assert.match(request.prompt, /For a female character, use a one-piece swimsuit/);
+    assert.doesNotMatch(request.prompt, /no top|shirtless|bare.chest/i);
+  }
   assert.deepEqual(requests.slice(2).map((request) => request.imagePromptUrls), [
     ["/outputs/new-1.png", "/uploads/blue.png"],
     ["/outputs/new-2.png", "/uploads/blue.png"],
@@ -145,6 +151,18 @@ test("real Regenerate Base rebuilds both masters from the portrait and all wardr
     ["/outputs/new-2.png", "/uploads/red.png"]
   ]);
   assert.deepEqual(app.progress.at(-1), { completed: 6, total: 6 });
+});
+
+test("the tank-top prompt change does not regenerate completed bases or wardrobes on lock", async (t) => {
+  const before = existingCharacter();
+  before.characterBaseSignature = JSON.stringify({ ...JSON.parse(before.characterBaseSignature), version: 2 });
+  before.characterBaseVideoSignature = JSON.stringify({ ...JSON.parse(before.characterBaseVideoSignature), version: 5 });
+  const app = editor(t, before);
+  await app.activate();
+  assert.equal(app.requests().length, 0);
+  assert.deepEqual(app.data().characterBaseSheet, before.characterBaseSheet);
+  assert.deepEqual(app.data().characterBaseVideoSheet, before.characterBaseVideoSheet);
+  assert.deepEqual(app.data().characterSheetVariants, before.characterSheetVariants);
 });
 
 test("real wardrobe retry edits only its corresponding saved masters, including legacy CU masters", async (t) => {

@@ -24,7 +24,10 @@ import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./j
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
+import { registerEditorRoutes } from "./routes/editor.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
+import { normalizeOpenAiEditMask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
+import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
 import { elevenLabsRates } from "./elevenlabs.js";
 import { createAtlasClient } from "./atlas.js";
 import { createAtlasMedia } from "./atlas-media.js";
@@ -42,6 +45,7 @@ import { registerMyNewtVoiceRoutes } from "./routes/myNewtVoice.js";
 import { createMyNewtVoiceTranscriber } from "./my-newt-voice.js";
 import { MY_NEWT_VOICE_MODEL, myNewtVoiceCost } from "../src/myNewt/voiceConfig.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
+import { registerNewtSkillRoutes } from "./routes/newtSkills.js";
 import { createMyNewtMediaInspector } from "./my-newt-media.js";
 import { relayLocalVideo } from "./local-video-request.js";
 import { isVideoGenerationRoute } from "../src/videoJobPolicy.js";
@@ -569,6 +573,14 @@ registerComposerPoseRoutes(app, {
   uniqueComposerPoseFileName
 });
 
+registerEditorRoutes(app, {
+  resolveAsset: resolveLocalAssetPathFromUrl,
+  createTarget: createManagedAssetTarget,
+  recordHistory: appendHistory,
+  ffmpegPath: ffmpegBinaryPath,
+  ffprobePath: ffprobeBinaryPath
+});
+
 registerAudioModelRoutes(app, {
   getKey: () => process.env.ELEVENLABS_API_KEY,
   readAudio: async (url) => {
@@ -623,7 +635,7 @@ registerImageEditRoutes(app, {
   sendError: sendApiError
 });
 
-registerNewtPresetRoutes(app, {
+const newtPresetStore = registerNewtPresetRoutes(app, {
   directory: path.join(rootDir, "server", "data", "newt-presets"),
   systemDirectory: path.join(rootDir, "server", "system-newt-presets"),
   assetsDirectory: path.join(outputsDir, "Newt-Presets", "dependencies"),
@@ -645,7 +657,10 @@ registerMyNewtVoiceRoutes(app, {
   })
 });
 
+const newtSkillStore = registerNewtSkillRoutes(app, { directory: path.join(rootDir, "server", "data", "newt-skills") });
 const myNewtService = registerMyNewtRoutes(app, {
+  skillStore: newtSkillStore,
+  presetStore: newtPresetStore,
   directory: path.join(rootDir, "server", "data", "my-newt"),
   getKey: () => process.env.OPENAI_API_KEY,
   getLlmConnection: newtLlmConnection,
@@ -705,6 +720,9 @@ function buildHealthPayload() {
       myNewtBackgroundActions: true,
       myNewtApprovedWork: true,
       myNewtAutoReview: true,
+      myNewtUnpricedGenerations: true,
+      myNewtCreativeSkills: true,
+      myNewtCanvasOrganization: true,
       myNewtFavoriteModels: true,
       myNewtRemote: true,
       myNewtRemoteRemembered: true,
@@ -732,6 +750,7 @@ function buildHealthPayload() {
       apiCostVisibility: true,
       imageEditing: true,
       generateAudio: true,
+      editorTimeline: true,
       elevenLabsVoices: true,
       skillDirector: true,
       creativeReasoningV2: true,
@@ -2185,6 +2204,7 @@ async function handleTransferCollageUpload(req, res) {
 
 app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, res) => {
   try {
+    req.body = normalizeCharacterWardrobeRequest(req.body);
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
@@ -2256,7 +2276,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         quality: req.body.quality,
         editMaskDataUrl: req.body.editMaskDataUrl
       });
-      const output = await downloadImage(req, openAiImage.remoteImage.url, isOpenAiImage25Model(selectedModel.displayName) ? `openai-image-2.5-${openAiImage25Variant(selectedModel.displayName)}` : "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
+      const output = await downloadImage(req, openAiImage.remoteImage.url, isOpenAiImage25Model(selectedModel.displayName) ? `openai-image-2.5-${openAiImage25Variant(selectedModel.displayName)}` : "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType, openAiImage.maskedEdit);
 
       const cost = isOpenAiImage25Model(selectedModel.displayName) ? openAiImage25Cost({ model: selectedModel.displayName, provider: "fal.ai", endpoint: openAiImage.endpoint, resolution: req.body.resolution, size: openAiImage.size, quality: openAiImage.quality }) : estimateOpenAiImage2Cost({
         resolution: req.body.resolution,
@@ -2286,7 +2306,9 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           ...(isOpenAiImage25Model(selectedModel.displayName) ? { background: req.body.background || "auto" } : {}),
           imagePromptCount: imagePromptUrls.length,
           imagePromptLabels: cleanReferenceLabels,
-          maskedEdit: Boolean(req.body.editMaskDataUrl)
+          maskedEdit: Boolean(req.body.editMaskDataUrl),
+          protectedPixelsRestored: Boolean(openAiImage.maskedEdit),
+          ...(req.body.characterWardrobeEdit ? { wardrobeEditMode: "full-sheet" } : {})
         },
         cost,
         remoteImage: openAiImage.remoteImage,
@@ -2641,14 +2663,16 @@ async function runAtlasImageModel(req, res, { prompt, selectedModel, imagePrompt
   const result = await atlasMedia.image({ model: selectedModel.displayName, prompt, imageInputs, aspectRatio,
     resolution: req.body.resolution, quality: req.body.quality, background: req.body.background,
     editMaskInput: req.body.editMaskDataUrl ? imageDataUrlAsset(req.body.editMaskDataUrl) : null }, key);
-  const output = await downloadImage(req, result.remoteImage.url, safePathSegment(selectedModel.displayName), "image/png");
+  const output = await downloadImage(req, result.remoteImage.url, safePathSegment(selectedModel.displayName), "image/png", result.maskedEdit);
   await appendHistory({ id: result.requestId, createdAt: new Date().toISOString(), mediaType: "image",
     provider: "Atlas Cloud", modelName: selectedModel.displayName, endpoint: result.endpoint,
     mode: imageInputs.length ? "Image edit with references" : "Image generation", prompt, submittedPrompt: result.submittedPrompt,
     project: projectFromBody(req.body), node: nodeFromBody(req.body),
     settings: { model: selectedModel.displayName, aspectRatio, requestedAspectRatio, resolution: result.resolution,
       quality: result.quality, background: req.body.background, size: result.size,
-      imagePromptCount: imageInputs.length, imagePromptLabels: cleanReferenceLabels, runtimeProvider: "atlas" },
+      imagePromptCount: imageInputs.length, imagePromptLabels: cleanReferenceLabels, runtimeProvider: "atlas",
+      maskedEdit: Boolean(result.maskedEdit), protectedPixelsRestored: Boolean(result.maskedEdit),
+      ...(req.body.characterWardrobeEdit ? { wardrobeEditMode: "full-sheet" } : {}) },
     cost: result.cost, remoteImage: result.remoteImage, localImage: output.publicPath,
     localThumbnail: output.thumbnailPublicPath, outputFileName: output.fileName, outputBytes: output.bytes, text: "" });
   return res.json({ requestId: result.requestId, endpoint: result.endpoint, provider: "Atlas Cloud", text: "", cost: result.cost,
@@ -8413,19 +8437,23 @@ function enrichVideoMetadata(video, metadata = {}) {
   return next;
 }
 
-async function downloadImage(req, url, kind, mimeTypeHint = "") {
+async function downloadImage(req, url, kind, mimeTypeHint = "", maskedEdit = null) {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated image: ${response.status} ${response.statusText}`);
   }
 
-  const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "image/png");
-  const extension = imageExtensionForUrl(url, mimeType);
+  const mimeType = maskedEdit ? "image/png" : normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "image/png");
+  const extension = maskedEdit ? ".png" : imageExtensionForUrl(url, mimeType);
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   if (!response.body) throw new Error("Generated image download returned no data.");
 
   try {
     await pipeline(Readable.fromWeb(response.body), createWriteStream(output.filePath));
+    if (maskedEdit) {
+      const completed = await finishOpenAiMaskedEdit(maskedEdit, await readFile(output.filePath));
+      await writeFile(output.filePath, completed);
+    }
   } catch (error) {
     await rm(output.filePath, { force: true }).catch(() => {});
     throw error;
@@ -13467,7 +13495,8 @@ async function generateKreaOpenAiImage2FromInputs({
 async function generateFalOpenAiImage2FromInputs({ model = imageModelNames.openAiImage2, background, prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
   const isImage25 = isOpenAiImage25Model(model);
-  if (isImage25 && editMaskInput && !imageInputs.length) throw httpError(400, "An edit mask needs a reference image.");
+  if (editMaskInput && !imageInputs.length) throw httpError(400, "An edit mask needs a reference image.");
+  if (editMaskInput) editMaskInput = await normalizeOpenAiEditMask(editMaskInput, imageInputs[0]);
   const quality = isImage25 ? normalizeOpenAiImage25Quality(requestedQuality) : normalizeOpenAiImage2Quality(requestedQuality);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
   if (isImage25 && imageInputs.length > 16) throw httpError(400, "Fal GPT Image 2.5 accepts up to 16 reference images.");
@@ -13503,6 +13532,7 @@ async function generateFalOpenAiImage2FromInputs({ model = imageModelNames.openA
     size,
     quality,
     submittedPrompt,
+    maskedEdit: editMaskInput ? { source: imageInputs[0].buffer, mask: editMaskInput.buffer } : null,
     resultText: result?.data?.revised_prompt || result?.data?.prompt || "",
     provider: "fal.ai"
   };

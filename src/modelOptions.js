@@ -46,6 +46,7 @@ export const imageModelOptions = [
   imageModelNames.krea2Large
 ];
 export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
+export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
 export const coverageModelOptions = [
   creativeImageDefaultModel,
   imageModelNames.openAiImage2,
@@ -53,6 +54,7 @@ export const coverageModelOptions = [
   imageModelNames.reve21
 ];
 export const storyboardImageModelOptions = [
+  storyboardImageDefaultModel,
   creativeImageDefaultModel,
   imageModelNames.openAiImage2
 ];

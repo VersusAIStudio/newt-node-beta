@@ -42,11 +42,11 @@ test("2.5 image controls display new quality levels, provider sizes and variable
   assert.match(legacy, /High \(Professional\)/);
 });
 
-test("new Character defaults to Nano Banana Pro while Coverage and Storyboard retain Sunburst", () => {
+test("new Storyboard defaults to Flare while Character keeps Nano Banana Pro and Coverage keeps Sunburst", () => {
   for (const type of ["character", "coverage", "storyboard"]) {
     const data = createDefaultNodeData(type, type, 1);
     const field = type === "character" ? "characterSheetModel" : "model";
-    const expectedModel = type === "character" ? "Nano Banana Pro" : openAiImage25Models.sunburst;
+    const expectedModel = type === "character" ? "Nano Banana Pro" : type === "storyboard" ? openAiImage25Models.flare : openAiImage25Models.sunburst;
     assert.equal(data[field], expectedModel);
     const html = renderToStaticMarkup(React.createElement(NodeBody, {
       node: { id: "creative", type, data: { ...data, storyboardTab: "advanced" } },
@@ -54,18 +54,57 @@ test("new Character defaults to Nano Banana Pro while Coverage and Storyboard re
       onUpdate: () => {}, onRun: () => {}
     }));
     assert.ok(html.includes(`selected="">${expectedModel}`));
-    assert.doesNotMatch(html, /Flare/);
+    if (type === "storyboard") {
+      assert.match(html, /OpenAI Image 2\.5 Sunburst/);
+      assert.equal(data.quality, "high");
+      assert.equal(data.resolution, "1K");
+      assert.equal(data.storyboardAutoQc, true);
+    } else assert.doesNotMatch(html, /Flare/);
   }
+});
+
+test("new Image Model nodes prefer Nano Banana Pro and respect disabled models", () => {
+  const start = source.indexOf("  function createNodeData(");
+  const end = source.indexOf("\n  function defaultNodePosition(", start);
+  assert.ok(start >= 0 && end > start);
+  const createImageNode = new Function("enabledImageModels", "createDefaultNodeData", "imageModelSelectionPatch",
+    `${source.slice(start, end)}\nreturn createNodeData("imageModel", "Image Model", 1);`);
+  for (const [enabled, expected] of [[imageModelOptions, "Nano Banana Pro"], [["OpenAI Image 2"], "OpenAI Image 2"], [[], "Nano Banana Pro"]]) {
+    const data = createImageNode(enabled, createDefaultNodeData, imageModelSelectionPatch);
+    assert.equal(data.model, expected);
+    assert.equal(data.aspectRatio, "16:9");
+    assert.equal(data.resolution, "2K");
+    assert.equal(data.batchCount, "1");
+    const html = renderToStaticMarkup(React.createElement(NodeBody, {
+      node: { id: "fresh-image", type: "imageModel", data }, incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(),
+      imageModelOptions, generationProvider: "fal", onUpdate: () => {}, onRun: () => {}
+    }));
+    assert.ok(html.includes(`selected="">${expected}`));
+  }
+});
+
+test("Image Model default changes do not replace saved selections or legacy missing-model fallbacks", () => {
+  for (const model of imageModelOptions) {
+    const data = { model, prompt: "Saved prompt", resolution: "4K", aspectRatio: "9:16", resultUrl: "/outputs/saved.png" };
+    const restored = normalizeCurrentNode({ id: "saved-image", type: "imageModel", data }).data;
+    for (const key of ["model", "prompt", "resultUrl"]) assert.equal(restored[key], data[key]);
+  }
+  assert.equal(normalizeImageModelData({}).model, "OpenAI Image 2");
 });
 
 test("saved creative models and full-resolution results survive restoration; legacy defaults stay put", () => {
   for (const type of ["character", "coverage", "storyboard"]) {
     const field = type === "character" ? "characterSheetModel" : "model";
-    for (const model of [openAiImage25Models.sunburst, "OpenAI Image 2"]) {
+    const models = [openAiImage25Models.sunburst, "OpenAI Image 2", ...(type === "storyboard" ? [openAiImage25Models.flare] : [])];
+    for (const model of models) {
       const node = { id: type, type, data: { ...createDefaultNodeData(type, type, 1), [field]: model, resultUrl: "/outputs/saved.png", characterBaseSheet: { url: "/outputs/base.png" }, characterBaseVideoSheet: { url: "/outputs/cu-base.png" }, storyboardFrames: [{ id: "frame", prompt: "Saved direction", resultUrl: "/outputs/saved.png" }], coverageResults: [{ url: "/outputs/saved.png", shotId: "standard-1" }] } };
       const restored = normalizeCurrentNode(JSON.parse(JSON.stringify(node))).data;
       assert.equal(restored[field], model);
       assert.equal(restored.resultUrl, "/outputs/saved.png");
+      if (type === "storyboard") {
+        assert.equal(restored.storyboardFrames[0].prompt, "Saved direction");
+        assert.equal(restored.storyboardFrames[0].resultUrl, "/outputs/saved.png");
+      }
       if (type === "character") {
         assert.deepEqual(restored.characterBaseSheet, node.data.characterBaseSheet);
         assert.deepEqual(restored.characterBaseVideoSheet, node.data.characterBaseVideoSheet);

@@ -1,5 +1,25 @@
+import { normalizeOutputDrawerWidth } from "./nodeGeometry.js";
+
 const lastPackageParentKey = "newtnode-last-package-parent";
 const lastOpenWorkflowKey = "newtnode-last-open-workflow";
+const canvasSnapToGridKey = "newtnode-canvas-snap-to-grid";
+const outputDrawerWidthKey = "newtnode-output-drawer-width";
+
+export function savedOutputDrawerWidth() {
+  return normalizeOutputDrawerWidth(readPreference(outputDrawerWidthKey));
+}
+
+export function rememberOutputDrawerWidth(width) {
+  writePreference(outputDrawerWidthKey, String(normalizeOutputDrawerWidth(width)));
+}
+
+export function canvasSnapToGridEnabled() {
+  return readPreference(canvasSnapToGridKey) === "true";
+}
+
+export function rememberCanvasSnapToGrid(enabled) {
+  writePreference(canvasSnapToGridKey, enabled === true ? "true" : "false");
+}
 
 export function lastPackageParentPath() {
   return readPreference(lastPackageParentKey);

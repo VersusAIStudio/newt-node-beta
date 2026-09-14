@@ -79,3 +79,8 @@ test("all graph selection gestures hand focus to the programmatically focusable 
   assert.match(editor, /className="node-canvas"\s+tabIndex=\{-1\}/);
   assert.match(editor, /if \(!canDeleteCanvasSelection\(event, canvasRef\.current\)\) return;\s+if \(selectedNodeIds\.length\)/);
 });
+
+test("canvas keyboard focus does not add a browser perimeter ring", () => {
+  const css = readFileSync(new URL("../src/nodeEditor.css", import.meta.url), "utf8");
+  assert.match(css, /\.node-canvas:focus\s*\{\s*outline:\s*none;\s*\}/);
+});

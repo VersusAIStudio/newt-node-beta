@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Canvas focus QA</title>
+    <style>
+      body { margin: 24px; background: #090909; color: #eee; font: 14px sans-serif; }
+      main { display: grid; gap: 16px; }
+      .node-canvas { box-sizing: border-box; height: 420px !important; padding: 24px; }
+      output { display: block; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Canvas focus QA (no project or provider access)</h1>
+      <button id="focus">Focus canvas</button>
+      <div class="node-canvas" tabindex="-1" role="region" aria-label="Test canvas">
+        <button>Canvas control</button>
+        <label>Node text <input aria-label="Node text" value="Keep this text" /></label>
+      </div>
+      <output aria-label="Delete events">0</output>
+    </main>
+    <script type="module">
+      import "../../src/nodeEditor.css";
+      import { focusCanvasSelection, canDeleteCanvasSelection } from "../../src/nodeKeyboardRouting.js";
+      const canvas = document.querySelector(".node-canvas");
+      const count = document.querySelector("output");
+      document.querySelector("#focus").addEventListener("click", () => focusCanvasSelection(canvas));
+      canvas.addEventListener("pointerdown", event => {
+        if (event.target !== canvas) return;
+        event.preventDefault();
+        focusCanvasSelection(canvas);
+      });
+      document.addEventListener("keydown", event => {
+        if (!canDeleteCanvasSelection(event, canvas)) return;
+        event.preventDefault();
+        count.textContent = String(Number(count.textContent) + 1);
+      });
+    </script>
+  </body>
+</html>

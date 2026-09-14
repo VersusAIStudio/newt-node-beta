@@ -10,6 +10,8 @@ import { reserveMyNewtCost } from "../server/my-newt-budget.js";
 import { falPricingEndpoints, kreaPricingModels } from "../server/pricing-sources.js";
 import { nodeApi } from "../src/api/newtApi.js";
 import { runImageModelGeneration } from "../src/nodeRunners/mediaModels.js";
+import sharp from "sharp";
+import { normalizeOpenAiEditMask } from "../server/openai-edit-mask.js";
 
 const server = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 function serverFunction(name) {
@@ -80,16 +82,21 @@ test("all exposed Fal aspect/resolution combinations meet 2.5 size limits", () =
 });
 
 test("Fal generation transport routes text and masked edits to the correct variant", async () => {
-  const calls = [];
+  const calls = [], uploadedMasks = [];
   const helpers = serverHelpers({ ...image25, ...sizes, imageModelNames, normalizeOpenAiImage2Quality,
+    normalizeOpenAiEditMask,
     subscribeFal: async (endpoint, options) => { calls.push({ endpoint, ...options }); return { data: { images: [{ url: "https://example.com/result.png" }] } }; },
-    firstFalImageResult: (data) => data.images[0], uploadImageInputToFal: async (image) => `https://example.com/${image.fileName}`,
+    firstFalImageResult: (data) => data.images[0], uploadImageInputToFal: async (image) => {
+      if (image.fileName === "edit-mask.png") uploadedMasks.push(image.buffer);
+      return `https://example.com/${image.fileName}`;
+    },
     httpError: (status, message) => Object.assign(new Error(message), { status })
   }, ["generateFalOpenAiImage2FromInputs", "openAiSizeToFalImageSize", "promptWithReferenceLabels"]);
+  const buffer = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#fff" } }).png().toBuffer();
   for (const model of [...models, imageModelNames.openAiImage2]) {
     for (const edit of [false, true]) {
       const result = await helpers.generateFalOpenAiImage2FromInputs({ model, prompt, aspectRatio: "16:9", resolution: "2K", quality: "xhigh", background: "transparent",
-        imageInputs: edit ? [{ fileName: "base.png", label: "@Park" }] : [], editMaskInput: edit ? { fileName: "mask.png" } : null });
+        imageInputs: edit ? [{ fileName: "base.png", label: "@Park", buffer }] : [], editMaskInput: edit ? { fileName: "mask.png", buffer } : null });
       const call = calls.at(-1);
       const variant = image25.openAiImage25Variant(model);
       assert.equal(call.endpoint, variant ? `openai/gpt-image-2.5/${variant}/${edit ? "edit" : "text-to-image"}` : `openai/gpt-image-2${edit ? "/edit" : ""}`);
@@ -97,9 +104,32 @@ test("Fal generation transport routes text and masked edits to the correct varia
       if (edit) {
         assert.match(call.input.prompt, /@Park/);
         assert.deepEqual(call.input.image_urls, ["https://example.com/base.png"]);
-        assert.equal(call.input.mask_url, "https://example.com/mask.png");
+        assert.equal(call.input.mask_url, "https://example.com/edit-mask.png");
+        assert.equal(result.maskedEdit.source, buffer);
+        assert.equal(result.maskedEdit.mask, uploadedMasks.at(-1));
+      } else {
+        assert.equal(result.maskedEdit, null);
       }
     }
+  }
+  assert.equal(uploadedMasks.length, 3);
+  for (const mask of uploadedMasks) {
+    assert.equal((await sharp(mask).metadata()).hasAlpha, true);
+    assert.equal((await sharp(mask).extractChannel(3).raw().toBuffer()).every(alpha => alpha === 0), true);
+  }
+});
+
+test("Fal rejects mismatched wardrobe masks before uploading or submitting either GPT model", async () => {
+  const helpers = serverHelpers({ ...image25, ...sizes, imageModelNames, normalizeOpenAiImage2Quality, normalizeOpenAiEditMask,
+    subscribeFal: () => assert.fail("No paid request"), uploadImageInputToFal: () => assert.fail("No upload"),
+    httpError: (status, message) => Object.assign(new Error(message), { status })
+  }, ["generateFalOpenAiImage2FromInputs", "promptWithReferenceLabels"]);
+  const base = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#777" } }).png().toBuffer();
+  const mask = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#fff" } }).png().toBuffer();
+  for (const model of [...models, imageModelNames.openAiImage2]) {
+    await assert.rejects(helpers.generateFalOpenAiImage2FromInputs({ model, prompt,
+      imageInputs: [{ buffer: base }, { buffer: mask }], editMaskInput: { buffer: mask } }), /first reference image dimensions/);
+    await assert.rejects(helpers.generateFalOpenAiImage2FromInputs({ model, prompt, editMaskInput: { buffer: mask } }), /reference image/);
   }
 });
 

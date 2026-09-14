@@ -5,7 +5,7 @@ export const characterBaseSheetPromptVersion = 2;
 export const characterVideoSheetPromptVersion = 5;
 
 export const characterNeutralBaseWardrobePrompt =
-  "Foundation wardrobe rule: create the identity master without a designed wardrobe. Dress the character only in minimal, seamless, form-fitting, plain matte charcoal swimwear. For a male character, use men's tight swim trunks with no top. For a female character, use a one-piece swimsuit. Keep the same swimwear consistently across all views wherever it is visible within the existing panel crops; do not reframe a close-up to show the swimwear. Do not change the character's anatomy or body proportions to fit the garment. Do not add styling, branding, patterns, accessories, jewelry, hats, outerwear, layers, or fashion details. This is an anatomy and identity foundation, not a wardrobe look. No nudity.";
+  "Foundation wardrobe rule: create the identity master without a designed wardrobe. Dress the character only in simple, seamless, form-fitting, plain matte charcoal swimwear. For a male character, use men's tight swim trunks with a matching opaque, form-fitting tank top that fully covers the chest, abdomen, and back. For a female character, use a one-piece swimsuit. Keep the same foundation clothing consistently across all views wherever it is visible within the existing panel crops; do not reframe a close-up to show the clothing. Do not change the character's anatomy or body proportions to fit the garment. Do not add styling, branding, patterns, accessories, jewelry, hats, outerwear, additional layers, or fashion details. This is an anatomy and identity foundation, not a wardrobe look. No nudity.";
 
 export const characterVideoNeutralBaseWardrobePrompt = characterNeutralBaseWardrobePrompt;
 
@@ -16,13 +16,13 @@ export const characterWardrobeEditPrompt = `Edit the provided Base Identity Char
 
 Change only the character's clothing, footwear, and requested wearable accessories. Study the selected wardrobe reference and transfer only its garments, materials, colors, construction, fit, footwear, and styling onto the locked character. Ignore every person, face, body, pose, environment, background, text, label, and unrelated object in the wardrobe reference. The Base Identity Character Sheet remains the sole authority for identity, anatomy, composition, and rendering.
 
-Apply exactly one consistent wardrobe across all six views, including any clothing visible near the neckline in close-up panels. Replace the neutral foundation swimwear or existing reference garment completely wherever the selected outfit should cover the body. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
+Apply exactly one complete, consistent outfit across all six views, including clothing visible near the neckline in close-up panels. The wardrobe reference is a single layered outfit, not a menu of alternatives: wear its inner layers, outerwear, footwear, and wearable accessories together in every view where visible. If the reference includes a coat or jacket, keep it on in both body panels and the close-ups; do not show coat-off alternatives or different stages of dressing. Do not invent garments or accessories absent from the reference. Referenced headwear may naturally cover hair without changing the character's underlying hairstyle or head shape. Replace the neutral foundation swimwear or existing reference garment completely wherever the selected outfit should cover the body. Return one complete, seamless sheet with naturally connected heads, necks, shoulders, and clothing, never an isolated edit patch or pasted face cutouts. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
 
 export const characterVideoWardrobeEditPrompt = `Edit the provided Base Identity CU Video Sheet. Treat that first image as the locked master image and preserve its exact canvas dimensions, panel layout, dividers, background, crop, camera views, poses, eyelines, facial identity, hair, skin, anatomy, body proportions, expressions, lighting, color treatment, texture, and image quality.
 
 Change only the character's clothing, footwear, and requested wearable accessories. Study the selected wardrobe reference and transfer only its garments, materials, colors, construction, fit, footwear, and styling onto the locked character. Ignore every person, face, body, pose, environment, background, text, label, and unrelated object in the wardrobe reference. The Base Identity CU Video Sheet remains the sole authority for identity, anatomy, composition, and rendering.
 
-Edit the exact Base Identity CU Video Sheet by changing only the wardrobe. Apply exactly one consistent wardrobe to both body panels and the clothing that would be visible in the closer panel. Replace the neutral foundation swimwear or existing reference garment completely wherever the selected outfit should cover the body. Seamlessly integrate the clothing onto the character. Keep the existing head crops unchanged; do not extend the body panels or reveal anything outside their current crops. Preserve the portrait's face, hair, head angle, eyeline, and expression exactly. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
+Edit the exact Base Identity CU Video Sheet by changing only the wardrobe. Apply exactly one complete, consistent outfit to both body panels and the clothing visible in the closer panel. The wardrobe reference is a single layered outfit, not a menu of alternatives: wear its inner layers, outerwear, footwear, and wearable accessories together in every view where visible. If the reference includes a coat or jacket, keep it on in both body panels and the close-up; do not show coat-off alternatives or different stages of dressing. Do not invent garments or accessories absent from the reference. Referenced headwear may naturally cover hair without changing the character's underlying hairstyle or head shape. Replace the neutral foundation swimwear or existing reference garment completely wherever the selected outfit should cover the body. Return one complete, seamless sheet with naturally connected heads, necks, shoulders, and clothing, never an isolated edit patch or pasted face cutouts. Keep the existing head crops unchanged; do not extend the body panels or reveal anything outside their current crops. Preserve the portrait's face, hair, head angle, eyeline, and expression exactly. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
 
 export function characterBaseGenerationSignature(data = {}) {
   const portraitUrl = data.characterPortrait?.localUrl || data.characterPortrait?.url || "";
@@ -106,21 +106,6 @@ export function characterWardrobeVariantIsCurrent(
     && variant.baseSignature
     && variant.baseSignature === baseSignature
   );
-}
-
-export function characterWardrobeMaskRegions(sheetKind = "image") {
-  if (sheetKind === "video") {
-    return [
-      { x: 0, y: 0, width: 0.5, height: 1 },
-      { x: 0.5, y: 0.78, width: 0.5, height: 0.22 }
-    ];
-  }
-
-  return [
-    { x: 0, y: 0.14, width: 0.47, height: 0.86 },
-    { x: 0.47, y: 0.39, width: 0.53, height: 0.11 },
-    { x: 0.47, y: 0.89, width: 0.53, height: 0.11 }
-  ];
 }
 
 export function upsertCharacterWardrobeVariant(variants = [], nextVariant) {

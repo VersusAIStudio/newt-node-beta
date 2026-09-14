@@ -111,6 +111,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.startsWith("/api/editor/")) return "editorTimeline";
   if (path.includes("generate-audio")) return "generateAudio";
   if (path.includes("utility-image")) return "utilityImage";
   if (path.includes("utility-video")) return "utilityVideo";
@@ -144,6 +145,13 @@ export async function postJson(path, body, fallbackMessage) {
   }, fallbackMessage);
 }
 
+export const editorApi = {
+  media: body => postJson("/api/editor/media", body, "Editor media inspection"),
+  render: body => postJson("/api/editor/render", body, "Editor export"),
+  job: id => getJson(`/api/editor/jobs/${encodeURIComponent(id)}`, "Editor export status"),
+  cancel: id => requestData(`/api/editor/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }, "Cancel Editor export")
+};
+
 export async function postForm(path, form, fallbackMessage) {
   return requestData(path, {
     method: "POST",
@@ -164,6 +172,16 @@ export const newtPresetsApi = {
   }
 };
 
+export const newtSkillsApi = {
+  list: async () => {
+    const health = await getJson("/api/health", "Could not check Newt skills.");
+    if (!health?.routes?.myNewtCreativeSkills) throw new Error("Restart the NewtNode backend to enable Creative Skills.");
+    return getJson("/api/my-newt/skills", "Could not load Newt skills.");
+  },
+  save: (id, body) => postJson(`/api/my-newt/skills/${encodeURIComponent(id)}`, body, "Could not save this skill."),
+  reset: (id, expectedRevision) => postJson(`/api/my-newt/skills/${encodeURIComponent(id)}/reset`, { expectedRevision }, "Could not reset this skill.")
+};
+
 async function requireSystemPresetBackend() {
   const health = await getJson("/api/health", "Could not check the preset library.");
   if (!health?.routes?.systemNewtPresets) throw new Error("Restart the NewtNode backend to activate protected System presets. No presets were changed.");
@@ -172,23 +190,28 @@ async function requireSystemPresetBackend() {
 let myNewtBackendCheckedAt = 0;
 let myNewtAutoReviewAvailable = false;
 let myNewtFavoriteModelsAvailable = false;
-async function requireMyNewtBackend(force = false, autoReview = false, favoriteModels = false) {
-  if (!force && (!autoReview || myNewtAutoReviewAvailable) && (!favoriteModels || myNewtFavoriteModelsAvailable) && Date.now() - myNewtBackendCheckedAt < 30000) return;
+let myNewtUnpricedGenerationsAvailable = false;
+async function requireMyNewtBackend(force = false, autoReview = false, favoriteModels = false, unpricedGenerations = false) {
+  if (!force && (!autoReview || myNewtAutoReviewAvailable) && (!favoriteModels || myNewtFavoriteModelsAvailable) && (!unpricedGenerations || myNewtUnpricedGenerationsAvailable) && Date.now() - myNewtBackendCheckedAt < 30000) return;
   const health = await getJson("/api/health", "Could not check Newt backend.");
   if (!health?.routes?.myNewtPlanning || !health?.routes?.myNewtLocalActions || !health?.routes?.myNewtBackgroundActions || !health?.routes?.myNewtApprovedWork) throw new Error("Restart the NewtNode backend to activate Newt approved-work protection and run reuse. No new task was started.");
+  if (!health.routes.myNewtCreativeSkills) throw new Error("Restart the NewtNode backend to activate Creative Skills and preset-first planning. No task or settings were submitted.");
+  if (!health.routes.myNewtCanvasOrganization) throw new Error("Restart the NewtNode backend to activate Newt canvas organization. No task or settings were submitted.");
   myNewtAutoReviewAvailable = health.routes.myNewtAutoReview === true;
   if (autoReview && !myNewtAutoReviewAvailable) throw new Error("Restart the NewtNode backend to activate Auto Review. No task or settings were submitted.");
   myNewtFavoriteModelsAvailable = health.routes.myNewtFavoriteModels === true;
   if (favoriteModels && !myNewtFavoriteModelsAvailable) throw new Error("Restart the NewtNode backend to activate favorite model preferences. No task or settings were submitted.");
+  myNewtUnpricedGenerationsAvailable = health.routes.myNewtUnpricedGenerations === true;
+  if (unpricedGenerations && !myNewtUnpricedGenerationsAvailable) throw new Error("Restart the NewtNode backend to activate Allow Unpriced Generations. No task or settings were submitted.");
   myNewtBackendCheckedAt = Date.now();
 }
 async function postMyNewt(path, body, message) {
-  await requireMyNewtBackend(path === "/api/my-newt/jobs" || path.endsWith("/control"), body.settings?.autoReview === true, Boolean(body.settings?.favoriteImageModel || body.settings?.favoriteVideoModel));
+  await requireMyNewtBackend(path === "/api/my-newt/jobs" || path.endsWith("/control"), body.settings?.autoReview === true, Boolean(body.settings?.favoriteImageModel || body.settings?.favoriteVideoModel), body.settings?.allowUnpricedGenerations === true);
   return postJson(path, body, message);
 }
 
 async function postRemoteMyNewtOnce(path, body) {
-  await requireMyNewtBackend(true);
+  await requireMyNewtBackend(true, body.settings?.autoReview === true, Boolean(body.settings?.favoriteImageModel || body.settings?.favoriteVideoModel), body.settings?.allowUnpricedGenerations === true);
   const response = await fetch(localApiFetchUrl(path), { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
   return ensureOk(response, await readJsonResponse(response, "Remote Newt command"), "The remote command was not accepted.");

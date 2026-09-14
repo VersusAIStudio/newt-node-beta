@@ -4,7 +4,7 @@ import { normalizeMyNewtFavoriteModels } from "./favoriteModels.js";
 export const MY_NEWT_MODEL = "gpt-6-astra";
 export const myNewtDefaults = Object.freeze({
   brief: "", jobId: "", favoriteImageModel: "", favoriteVideoModel: "", allowExisting: false, allowImages: false, allowVideos: false,
-  approveRuns: true, approvePlan: true, autoReview: false, allowMediaInspection: true, localOnly: false, budget: 5, maxSteps: 40, maxMinutes: 60, intelligence: "high", reasoningMode: "auto"
+  approveRuns: true, approvePlan: true, autoReview: false, allowUnpricedGenerations: false, allowMediaInspection: true, localOnly: false, budget: 5, maxSteps: 40, maxMinutes: 60, intelligence: "high", reasoningMode: "auto"
 });
 
 // Only creative inputs are editable. Credentials, runtime flags, locks, and outputs never are.
@@ -19,7 +19,7 @@ export const myNewtFields = Object.freeze({
   character: ["characterName", "characterPhysicalDetails", "characterReferenceNotes", "characterSheetModel", "cinematicCharacterSheet", "cuVideoGeneration"],
   skillDirector: ["sceneName", "sceneOverview", "text", "skillShotCount", "skillDurationSeconds", "skillVideoModel", "skillResolution", "skillAspectRatio", "skillDirectorAudioMode", "skillApproach", "styleDirection", "motionBrief", "motionDirection", "shotListNotes", "skillDirectorRevisionNotes"],
   storyboard: ["sceneName", "sceneDescription", "storyboardNotes", "frameCount", "model", "resolution", "aspectRatio", "useStoryboardStyle", "useMoodBoard", "storyboardStylePreset"],
-  image: [], video: [], audio: [], transfer: [], composer: [], utility: []
+  image: [], video: [], audio: [], transfer: [], composer: [], utility: [], editor: []
 });
 
 export function myNewtSettings(data = {}) {
@@ -30,6 +30,7 @@ export function myNewtSettings(data = {}) {
     allowVideos: data.allowVideos === true, approveRuns: data.approveRuns !== false,
     approvePlan: data.approvePlan !== false,
     autoReview: data.autoReview === true,
+    allowUnpricedGenerations: data.allowUnpricedGenerations === true,
     allowMediaInspection: data.allowMediaInspection !== false,
     localOnly: data.localOnly === true,
     intelligence: myNewtIntelligence(data.intelligence).value,
@@ -98,7 +99,7 @@ export const myNewtRunStages = Object.freeze({ skillDirector: ["style", "motion"
 
 export function myNewtLocalSourceIds(action) {
   const p = action.payload || {};
-  return [...new Set([p.nodeId, p.from?.nodeId, p.to?.nodeId, ...(p.nodeIds || []), ...(p.bindings && Array.isArray(p.bindings) ? p.bindings.map((binding) => binding.sourceId) : []), ...(p.copies || []).flatMap((copy) => copy.bindings.map((binding) => binding.sourceId))].filter(Boolean))];
+  return [...new Set([p.nodeId, p.from?.nodeId, p.to?.nodeId, ...(p.nodeIds || []), ...(p.retainedNodeIds || []), ...(p.bindings && Array.isArray(p.bindings) ? p.bindings.map((binding) => binding.sourceId) : []), ...(p.copies || []).flatMap((copy) => copy.bindings.map((binding) => binding.sourceId))].filter(Boolean))];
 }
 
 export function myNewtLocalActionSignature(snapshot, action) {
@@ -114,6 +115,8 @@ export function myNewtLocalActionSignature(snapshot, action) {
 
 export function myNewtActionSnapshot(snapshot, action) {
   const ids = new Set(myNewtLocalSourceIds(action));
+  if (["arrange", "cleanup"].includes(action.operation)) return { ...snapshot, catalog: [], nodes: snapshot.nodes.filter(node => ids.has(node.id)),
+    edges: snapshot.edges.filter(edge => ids.has(edge.from.nodeId) || ids.has(edge.to.nodeId)) };
   const bindings = [...(Array.isArray(action.payload?.bindings) ? action.payload.bindings : []), ...(action.payload?.copies || []).flatMap((copy) => copy.bindings)];
   const attachments = bindings.flatMap((binding) => binding.attachment ? [binding.attachment] : []);
   let added = true;

@@ -1,12 +1,20 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { File } from "node:buffer";
+import { createHash } from "node:crypto";
 
 export function createMyNewtMediaInspector({ resolveAsset, probeVideo, runFfmpeg }) {
-  return async (url, key) => {
+  const version = async (url) => {
+    if (!/^\/(uploads|outputs|workflow-assets)\//.test(url)) throw new Error("Only managed project assets can be inspected.");
+    const { filePath } = await resolveAsset(url);
+    const info = await stat(filePath);
+    return createHash("sha256").update(JSON.stringify([filePath, info.size, info.mtimeMs, info.ctimeMs])).digest("hex");
+  };
+  const inspect = async (url, key) => {
     if (!/^\/(uploads|outputs|workflow-assets)\//.test(url)) throw new Error("Only managed project assets can be inspected.");
     const { filePath, fileName } = await resolveAsset(url);
+    const assetVersion = await version(url);
     const extension = path.extname(fileName).toLowerCase();
     const audio = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"].includes(extension);
     const video = [".mp4", ".mov", ".webm", ".mkv", ".m4v"].includes(extension);
@@ -25,7 +33,7 @@ export function createMyNewtMediaInspector({ resolveAsset, probeVideo, runFfmpeg
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(120000) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error?.message || "Audio transcription failed.");
-        return { cost: duration / 60 * 0.006, content: [{ type: "input_text", text: `Transcript of the first ${duration} seconds of ${url}. This is not an assessment of music or sound quality:\n${data.text || "[No speech detected]"}` }] };
+        return { version: await version(url) === assetVersion ? assetVersion : null, cost: duration / 60 * 0.006, content: [{ type: "input_text", text: `Transcript of the first ${duration} seconds of ${url}. This is not an assessment of music or sound quality:\n${data.text || "[No speech detected]"}` }] };
       }
       const duration = video ? Number((await probeVideo(filePath)).duration) || 0 : 0;
       const count = video ? 6 : 1;
@@ -37,7 +45,9 @@ export function createMyNewtMediaInspector({ resolveAsset, probeVideo, runFfmpeg
         if (video) content.push({ type: "input_text", text: `${seconds.toFixed(2)} seconds` });
         content.push({ type: "input_image", image_url: `data:image/jpeg;base64,${(await readFile(output)).toString("base64")}`, detail: "high" });
       }
-      return { content, cost: 0 };
+      return { content, cost: 0, version: await version(url) === assetVersion ? assetVersion : null };
     } finally { await rm(directory, { recursive: true, force: true }); }
   };
+  inspect.version = version;
+  return inspect;
 }

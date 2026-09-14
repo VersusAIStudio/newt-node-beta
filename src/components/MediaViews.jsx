@@ -1,9 +1,10 @@
 import React from "react";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, clampCurveNumber, curveLookup, defaultCurvePoints, defaultToneAdjustments, maxCurvePoints, normalizedToneAdjustments, sortedCurvePoints } from "../imageAdjustments.js";
-import { Box, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, PanelRightClose, Pencil, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
+import { Box, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, PanelRightClose, Pencil, Plus, RotateCw, Sun, Type, Video, X } from "lucide-react";
 import { capitalizeMediaType, finishOutputItemDragData, fullResolutionImageProps, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { clampCropRect, containedMediaSize, moveCropRect, resizeCropRect } from "../mediaPreviewLayout.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
+import { OutputDrawerResizeHandle } from "./OutputDrawerResizeHandle.jsx";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
 const LazyImageEditStudio = React.lazy(() => import("./ImageEditStudio.jsx").then((module) => ({ default: module.ImageEditStudio })));
@@ -86,24 +87,23 @@ export function UploadIcon({ type }) {
   return <Plus size={22} />;
 }
 
-export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = defaultOutputDragMime }) {
+export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ items, width, onResize, onClose, onPreviewOpen, outputDragMime = defaultOutputDragMime }) {
+  const listId = React.useId();
   const startDrag = React.useCallback((event, item) => {
     setOutputItemDragData(event.dataTransfer, item, outputDragMime);
   }, [outputDragMime]);
 
   return (
     <aside className="project-output-drawer">
+      <OutputDrawerResizeHandle width={width} onResize={onResize} controlsId={listId} />
       <div className="output-drawer-header">
         <div className="output-drawer-actions">
-          <button onClick={onRefresh} title="Refresh outputs" aria-label="Refresh outputs">
-            <RefreshCw size={14} />
-          </button>
           <button onClick={onClose} title="Hide project outputs" aria-label="Hide project outputs">
             <PanelRightClose size={16} />
           </button>
         </div>
       </div>
-      <div className="project-output-list">
+      <div id={listId} className="project-output-list">
         {items.length ? (
           items.map((item) => (
             <ProjectOutputThumb

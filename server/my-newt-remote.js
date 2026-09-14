@@ -50,7 +50,7 @@ function remoteJob(job, room) {
   const activeUrls = new Set((job.outputs || []).map((item) => item.url));
   for (const [id, url] of room.media) if (!activeUrls.has(url)) room.media.delete(id);
   return { id: job.id, controlVersion: remoteControlVersion(job), status: job.status, brief: text(job.brief, 16000),
-    message: text(job.message), spent: job.spent, reserved: job.reserved, remaining: job.remaining,
+    message: text(job.message), spent: job.spent, reserved: job.reserved, remaining: job.remaining, unpricedCount: job.unpricedCount || 0,
     budget: job.settings?.budget, steps: job.steps, execution: job.execution === "local" ? "local" : "ai", outputs,
     plan: job.plan ? { summary: text(job.plan.summary, 8000), estimatedGenerationCost: job.plan.estimatedGenerationCost,
       steps: (job.plan.steps || []).slice(0, 100).map((step) => ({ id: step.id, title: text(step.title, 500), status: step.status })) } : null,
