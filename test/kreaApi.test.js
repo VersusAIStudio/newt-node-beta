@@ -10,7 +10,6 @@ import {
   extractKreaJobResultUrls,
   kreaErrorMessage,
   kreaEndpointForModel,
-  normalizeKreaImageResolution,
   resolveFalKreaProvider,
   shouldRetryKreaJobLookup,
   supportsKreaModel
@@ -62,7 +61,6 @@ test("current shared NewtNode models resolve to Krea endpoints", () => {
     "Nano Banana 2",
     "Nano Banana Pro",
     "OpenAI Image 2",
-    "Krea 2 Large"
   ].forEach((name) => assert.equal(supportsKreaModel("image", name), true, name));
 
   assert.equal(kreaEndpointForModel("video", "Seedance 2.0"), "/generate/video/bytedance/seedance-2");
@@ -118,16 +116,11 @@ test("OpenAI Image 2 Krea input preserves high quality, references, and output c
   });
 });
 
-test("Krea 2 adapts references to its provider-specific fields", () => {
-  const krea = buildKreaImageInput({
-    modelName: "Krea 2 Large",
-    prompt: "Campaign frame",
-    referenceUrls: ["https://example.com/style.png"],
-    creativity: "raw"
-  });
-  assert.equal(krea.creativity, "raw");
-  assert.deepEqual(krea.image_style_references, [{ url: "https://example.com/style.png", strength: 0.7 }]);
-  assert.equal(normalizeKreaImageResolution("Krea 2 Large", "4K"), "1K");
+test("retired image models are rejected instead of building a replacement request", () => {
+  for (const modelName of ["Krea 2 Large", "REVE 2.1"]) {
+    assert.equal(supportsKreaModel("image", modelName), false);
+    assert.throws(() => buildKreaImageInput({ modelName, prompt: "Campaign frame" }), { status: 400 });
+  }
 });
 
 test("Krea job URL extraction accepts string, object, and typed model results", () => {

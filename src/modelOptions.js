@@ -1,4 +1,3 @@
-export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
 import { openAiImage25Models, isOpenAiImage25Model } from "./openAiImage25.js";
 import {
   seedance25AspectRatioOptions,
@@ -32,26 +31,21 @@ export const imageModelNames = {
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   openAiImage25Sunburst: openAiImage25Models.sunburst,
-  openAiImage25Flare: openAiImage25Models.flare,
-  reve21: "REVE 2.1",
-  krea2Large: "Krea 2 Large"
+  openAiImage25Flare: openAiImage25Models.flare
 };
 export const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
-  imageModelNames.openAiImage25Flare,
-  imageModelNames.reve21,
-  imageModelNames.krea2Large
+  imageModelNames.openAiImage25Flare
 ];
 export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
 export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
 export const coverageModelOptions = [
   creativeImageDefaultModel,
   imageModelNames.openAiImage2,
-  imageModelNames.nanoBananaPro,
-  imageModelNames.reve21
+  imageModelNames.nanoBananaPro
 ];
 export const storyboardImageModelOptions = [
   storyboardImageDefaultModel,
@@ -59,9 +53,7 @@ export const storyboardImageModelOptions = [
   imageModelNames.openAiImage2
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
-export const openAiImageAspectRatios = nanoImageAspectRatios;
-export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
-export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
+export const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
 export const seedanceVideoDurationOptions = Array.from({ length: 12 }, (_value, index) => `${index + 4} seconds`);
 export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p", "4k"];
@@ -234,6 +226,7 @@ export const model3DDescription =
   "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
 
 export const utilityImageModelNames = {
+  coverage: "Coverage",
   autoAspect: "Auto Aspect",
   frameIt: "Frame It",
   model3d: "3D",
@@ -314,6 +307,7 @@ export const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
 export const wanVaceAccelerationOptions = ["regular", "low", "none"];
 
 export const utilityModelDescriptions = {
+  [utilityImageModelNames.coverage]: "Generate nine camera angles from a connected image.",
   [utilityImageModelNames.autoAspect]: "Reframes one connected image into multiple selected aspect ratios while preserving its visual identity.",
   [utilityImageModelNames.frameIt]: "Builds a poseable multi-figure composition and outputs the framed camera view as an image guide.",
   [utilityImageModelNames.model3d]: model3DDescription,

@@ -17,7 +17,7 @@ test.beforeEach((t) => {
   t.after(() => assert.equal(network.mock.callCount(), 0));
 });
 
-function setup(t) {
+function setup(t, quoteInput) {
   const events = [];
   const client = {
     upload: t.mock.fn(async (input, credential) => {
@@ -38,9 +38,21 @@ function setup(t) {
   const imageSize = t.mock.fn(({ resolution }) => resolution === "4K" ? "3840x2160" : "2048x1152");
   const labelPrompt = t.mock.fn((text, images) => images.length ? `${text}\nReferences: ${images.map((image) => image.fileName).join(", ")}` : text);
   const validateVideoAssets = t.mock.fn(async () => { events.push(["validate", "video"]); });
-  const media = createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets });
+  const media = createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets, quoteInput });
   return { media, client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets, events };
 }
+
+test("Atlas quotes the complete prepared request; a pricing failure never blocks or replays generation", async t => {
+  const quote = { amountUsd: 0.123, currency: "USD", estimated: true };
+  const quoteInput = t.mock.fn(async () => quote), h = setup(t, quoteInput);
+  const result = await h.media.image({ model: "Nano Banana 2", prompt, imageInputs: refs(1), aspectRatio: "16:9", resolution: "1K" }, key);
+  assert.equal(result.cost.amountUsd, quote.amountUsd);
+  assert.deepEqual(quoteInput.mock.calls[0].arguments[0], submitted(h));
+  assert.equal(quoteInput.mock.calls[0].arguments[1], key);
+  const failed = setup(t, async () => { throw new Error("pricing offline"); });
+  const output = await failed.media.video({ model: "Seedance 2.5", prompt, duration: 8, resolution: "720p", aspectRatio: "16:9" }, key);
+  assert.equal(output.url, remote.url); assert.equal(failed.client.generate.mock.callCount(), 1);
+});
 
 function submitted(harness) {
   assert.equal(harness.client.generate.mock.callCount(), 1);
@@ -66,7 +78,6 @@ test("all supported image models preserve exact routes, ordered native reference
     ["OpenAI Image 2.5 Flare", "openai/gpt-image-2.5-flare"],
     ["Nano Banana 2", "google/nano-banana-2"],
     ["Nano Banana Pro", "google/nano-banana-pro"],
-    ["REVE 2.1", "reve-ai/reve-2.1"]
   ];
   for (const [model, id] of contracts) for (const count of [0, 1, 2]) {
     const h = setup(t);
@@ -74,7 +85,7 @@ test("all supported image models preserve exact routes, ordered native reference
     const input = Object.freeze({ model, prompt, imageInputs: images, aspectRatio: "16:9", resolution: "4K", quality: "high" });
     const result = await h.media.image(input, key);
     const body = submitted(h);
-    const mode = count > 1 && model === "REVE 2.1" ? "remix" : count ? "edit" : "text-to-image";
+    const mode = count ? "edit" : "text-to-image";
     assert.equal(body.model, `${id}/${mode}`);
     assert.equal(body.prompt, result.submittedPrompt);
     assert.equal(body.output_format, "png");
@@ -155,8 +166,8 @@ test("explicit OpenAI size is preserved and invalid explicit size is never defau
   }
 });
 
-test("Nano/REVE remove shared OpenAI fields before requests and pricing", async (t) => {
-  for (const model of ["Nano Banana 2", "Nano Banana Pro", "REVE 2.1"]) {
+test("Nano Banana remove shared OpenAI fields before requests and pricing", async (t) => {
+  for (const model of ["Nano Banana 2", "Nano Banana Pro"]) {
     const h = setup(t);
     const options = Object.freeze({ model, prompt, size: "2048x1152", resolution: "2K", quality: "max", background: "transparent", aspectRatio: "9:16" });
     const result = await h.media.image(options, key);
@@ -166,11 +177,10 @@ test("Nano/REVE remove shared OpenAI fields before requests and pricing", async 
     assert.equal("quality" in body, false);
     assert.equal("background" in body, false);
     assert.equal(body.aspect_ratio, "9:16");
-    assert.equal(body.resolution, model === "REVE 2.1" ? "4k" : "2k");
-    assert.equal(result.resolution, model === "REVE 2.1" ? "4K" : "2K");
+    assert.equal(body.resolution, "2k");
+    assert.equal(result.resolution, "2K");
     assert.equal(result.size, undefined);
-    if (model === "REVE 2.1") assert.equal(body.remove_background, false);
-    else {
+    {
       assert.equal(body.media_resolution, "high");
       assert.equal(body.thinking_level, model === "Nano Banana 2" ? "high" : undefined);
       // Verify adapter settings reach pricing cleanly; an unverified price may correctly remain null.
@@ -180,16 +190,11 @@ test("Nano/REVE remove shared OpenAI fields before requests and pricing", async 
     assert.equal(options.quality, "max");
     assert.equal(options.background, "transparent");
   }
-  for (const resolution of [undefined, "4K"]) {
-    const h = setup(t);
-    await h.media.image({ model: "REVE 2.1", prompt, resolution }, key);
-    assert.equal(submitted(h).resolution, "4k");
-  }
 });
 
 test("image reference caps and unsupported native settings reject before transfers", async (t) => {
   for (const [model, cap] of [["OpenAI Image 2", 10], ["OpenAI Image 2.5 Sunburst", 16],
-    ["OpenAI Image 2.5 Flare", 16], ["Nano Banana 2", 14], ["Nano Banana Pro", 10], ["REVE 2.1", 6]]) {
+    ["OpenAI Image 2.5 Flare", 16], ["Nano Banana 2", 14], ["Nano Banana Pro", 10]]) {
     const h = setup(t);
     await assert.rejects(h.media.image({ model, prompt, imageInputs: refs(cap + 1) }, key), new RegExp(`${cap} reference images`));
     noTransfers(h);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isCoverageNode } from "../coveragePresets.js";
 import { myNewtApi } from "../api/newtApi.js";
 import { myNewtInputSignature, myNewtLocalActionSignature, myNewtSettings, myNewtSnapshot, snapshotAssetUrls, validateMyNewtPatch } from "./contract.js";
 import { assertMyNewtCanvasAction, myNewtCanvasOperations, myNewtCanvasSignature } from "./canvasActions.js";
@@ -11,6 +12,7 @@ import { assertMyNewtProtection, myNewtProtectedNodes } from "./workProtection.j
 import { myNewtCompletedRunRecord, myNewtReusableRun } from "./runReuse.js";
 import { useMyNewtRemote } from "./useMyNewtRemote.js";
 import { myNewtRequiresRunApproval } from "./review.js";
+import { refreshGenerationEstimate } from "../api/pricingEstimate.js";
 
 export function useMyNewt(adapter) {
   const live = useRef(adapter); live.current = adapter;
@@ -87,6 +89,11 @@ export function useMyNewt(adapter) {
           const target = live.current.getGraph().nodes.find((node) => node.id === next.pending.payload.nodeId);
           if (!target) throw new Error("The planned node no longer exists.");
           const preview = live.current.describeRun(target, next.pending.payload.stage);
+          if (["imageModel", "videoModel"].includes(target.type)) {
+            const quote = await refreshGenerationEstimate({ ...preview, kind: target.type === "videoModel" ? "video" : "image" });
+            preview.estimatedCost = quote.amountUsd;
+          }
+          if (cancelled) return;
           next = await myNewtApi.prepare(jobId, { ...owner, actionId: next.pending.id, preview });
           if (cancelled) return;
         }
@@ -179,8 +186,8 @@ export function useMyNewt(adapter) {
       } else if (action.operation === "run") {
         guard(node, node?.type === "skillDirector");
         if (myNewtInputSignature(action.expected, node.id) !== myNewtInputSignature(snapshot(), node.id)) throw new Error("Connected assets or inputs changed after this run was planned. Read the updated project before generating.");
-        if (node.type === "myNewt" || !["text", "imageModel", "videoModel", "coverage", "character", "skillDirector", "storyboard"].includes(node.type)) throw new Error("This node needs manual operation in this version.");
-        const hasImages = ["imageModel", "coverage", "character"].includes(node.type) || (node.type === "storyboard" && p.stage === "generate");
+        if (!isCoverageNode(node) && !["text", "imageModel", "videoModel", "character", "skillDirector", "storyboard"].includes(node.type)) throw new Error("This node needs manual operation in this version.");
+        const hasImages = isCoverageNode(node) || ["imageModel", "character"].includes(node.type) || (node.type === "storyboard" && p.stage === "generate");
         if (myNewtRequiresRunApproval(permissions, p) && !action.approved) throw new Error("Approve this run before generation.");
         if (hasImages && !permissions.allowImages) throw new Error("Image generation is disabled in Newt Settings.");
         if (node.type === "videoModel" && !permissions.allowVideos) throw new Error("Video generation is disabled in Newt Settings.");

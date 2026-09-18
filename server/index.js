@@ -24,6 +24,7 @@ import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./j
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
+import { registerExploreRoutes } from "./routes/explore.js";
 import { registerEditorRoutes } from "./routes/editor.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { normalizeOpenAiEditMask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
@@ -36,6 +37,7 @@ import { supportsAtlasImageModel } from "../src/atlasImages.js";
 import { supportsAtlasVideoModel } from "../src/atlasVideos.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import { PricingRefresh } from "./pricing-refresh.js";
+import { ProviderPricing } from "./provider-pricing.js";
 import { registerPricingRoutes } from "./routes/pricing.js";
 import { configurePricingReader, currentOpenAiRates } from "../src/pricingCatalog.js";
 import { normalizeNodePreferences } from "../src/nodePreferences.js";
@@ -55,6 +57,8 @@ import { llmResponseEndpoints, llmResponseModel, llmUsageCost, requestLlmRespons
 import { currentAtlasLlmRates } from "../src/atlasLlmPricing.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
 import { storyboardPlanIssues, storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
+import { assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues, storyboardQcCharacterInputs } from "../src/storyboardCast.js";
+import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
 import {
   apiKeyProviderIds,
   apiKeyProviderPreferences,
@@ -71,16 +75,6 @@ import {
   nanoBanana2FalEditEndpoint as defaultNanoBanana2FalEditEndpoint,
   nanoBanana2FalTextEndpoint as defaultNanoBanana2FalTextEndpoint
 } from "../src/nanoBanana2.js";
-import {
-  buildReve21FalRequest,
-  estimateReve21ImageCost,
-  isReve21Model,
-  reve21AspectRatios,
-  reve21CostPerImage,
-  reve21FalEditEndpoint as defaultReve21FalEditEndpoint,
-  reve21FalRemixEndpoint as defaultReve21FalRemixEndpoint,
-  reve21FalTextEndpoint as defaultReve21FalTextEndpoint
-} from "../src/reve21.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
 import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatios.js";
 import { normalizeFilmDirectorDuration } from "../src/filmDirectorDurations.js";
@@ -227,6 +221,7 @@ let clientDiagnosticWriteQueue = Promise.resolve();
 let falDebugWriteQueue = Promise.resolve();
 const localAssetRecoveryJobs = new Map();
 const atlasMedia = createAtlasMedia({
+  quoteInput: (input, key) => providerPricing.atlasInput(input, key),
   client: createAtlasClient({ onProgress: (job) => console.info("Atlas Cloud prediction", job) }),
   readLocalAsset,
   validateVideoAssets: (request) => validateAtlasVideoAssets(request, async (source) => {
@@ -290,32 +285,24 @@ const klingO3ProAudioCostPerSecond = Number(process.env.KLING_O3_PRO_AUDIO_COST_
 const klingO34kCostPerSecond = Number(process.env.KLING_O3_4K_COST_PER_SECOND || 0.42);
 const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
 const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
-const krea2LargeCost = Number(process.env.KREA_2_LARGE_IMAGE_COST || 0.06);
-const krea2LargeStyleReferenceCost = Number(process.env.KREA_2_LARGE_IMAGE_STYLE_REFERENCE_COST || 0.065);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
-const openAiImageAspectRatios = nanoImageAspectRatios;
-const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
-const krea2CreativityOptions = ["raw", "low", "medium", "high"];
-const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
+const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
+const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", "4:3", "3:4", "2:1", "1:2"];
 const imageModelNames = {
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   openAiImage25Sunburst: openAiImage25Models.sunburst,
-  openAiImage25Flare: openAiImage25Models.flare,
-  reve21: "REVE 2.1",
-  krea2Large: "Krea 2 Large"
+  openAiImage25Flare: openAiImage25Models.flare
 };
 const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
-  imageModelNames.openAiImage25Flare,
-  imageModelNames.reve21,
-  imageModelNames.krea2Large
+  imageModelNames.openAiImage25Flare
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
@@ -338,10 +325,6 @@ const defaultModelPreferences = {
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
 const falNanoBanana2TextEndpoint = process.env.FAL_NANO_BANANA_2_ENDPOINT || defaultNanoBanana2FalTextEndpoint;
 const falNanoBanana2EditEndpoint = process.env.FAL_NANO_BANANA_2_EDIT_ENDPOINT || defaultNanoBanana2FalEditEndpoint;
-const falKrea2LargeEndpoint = process.env.FAL_KREA_2_LARGE_ENDPOINT || "krea/v2/large/text-to-image";
-const falReve21TextEndpoint = process.env.FAL_REVE_2_1_TEXT_ENDPOINT || defaultReve21FalTextEndpoint;
-const falReve21EditEndpoint = process.env.FAL_REVE_2_1_EDIT_ENDPOINT || defaultReve21FalEditEndpoint;
-const falReve21RemixEndpoint = process.env.FAL_REVE_2_1_REMIX_ENDPOINT || defaultReve21FalRemixEndpoint;
 const falKlingO3ProTextEndpoint = process.env.FAL_KLING_O3_PRO_TEXT_ENDPOINT || "fal-ai/kling-video/o3/pro/text-to-video";
 const falKlingO3ProReferenceEndpoint = process.env.FAL_KLING_O3_PRO_REFERENCE_ENDPOINT || "fal-ai/kling-video/o3/pro/reference-to-video";
 const falKlingO34kTextEndpoint = process.env.FAL_KLING_O3_4K_TEXT_ENDPOINT || "fal-ai/kling-video/o3/4k/text-to-video";
@@ -493,11 +476,16 @@ const pricingRefresh = new PricingRefresh({
   filePath: path.join(dataDir, "pricing-catalog.json"),
   enableAtlasPricing: true,
   getFalKey: () => process.env.FAL_KEY || "",
+  getProviderKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY || "" : provider === "fal" ? process.env.FAL_KEY || "" : "",
+  getEnabledProviders: () => ({ fal: Boolean(process.env.FAL_KEY), krea: Boolean(process.env.KREA_API_KEY),
+    atlas: Boolean(process.env.ATLAS_API_KEY), openai: Boolean(openAiTextApiKey), google: Boolean(process.env.GOOGLE_API_KEY) }),
   refreshKeys: refreshRuntimeConfigFromEnvFile
 });
 await pricingRefresh.ready;
 const generationPricingScope = new AsyncLocalStorage();
+const generationBillingScope = new AsyncLocalStorage();
 configurePricingReader(() => generationPricingScope.getStore() || pricingRefresh.catalog());
+const providerPricing = new ProviderPricing({ pricing: pricingRefresh, getKey: provider => pricingRefresh.getProviderKey(provider) });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, callback) => callback(null, uploadsDir),
@@ -555,9 +543,10 @@ registerCoreRoutes(app, {
   pullRuntimeUpdate,
   requestServerRestart
 });
-registerPricingRoutes(app, pricingRefresh);
+registerPricingRoutes(app, pricingRefresh, providerPricing);
 app.use(["/api/node", "/api/generate", "/api/my-newt/transcribe"], (_req, _res, next) => {
-  generationPricingScope.run(pricingRefresh.catalog(), next);
+  pricingRefresh.ensureFresh().catch(() => {});
+  generationBillingScope.run([], () => generationPricingScope.run(pricingRefresh.snapshot(), next));
 });
 
 app.post("/api/system/client-diagnostic", (req, res) => {
@@ -580,6 +569,8 @@ registerEditorRoutes(app, {
   ffmpegPath: ffmpegBinaryPath,
   ffprobePath: ffprobeBinaryPath
 });
+
+registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost });
 
 registerAudioModelRoutes(app, {
   getKey: () => process.env.ELEVENLABS_API_KEY,
@@ -727,6 +718,7 @@ function buildHealthPayload() {
       myNewtRemote: true,
       myNewtRemoteRemembered: true,
       weeklyPricing: true,
+      providerPricing: true,
       smartTextPromptEditor: true,
       myNewtVoice: true,
       newtPresets: true,
@@ -754,6 +746,7 @@ function buildHealthPayload() {
       elevenLabsVoices: true,
       skillDirector: true,
       creativeReasoningV2: true,
+      explore: true,
       storyboardQc: true,
       mediaThumbnail: true,
       settings: true
@@ -1510,15 +1503,6 @@ app.get("/api/stats", async (_req, res) => {
       openAiImage25: {
         models: Object.values(openAiImage25Models),
         ...openAiImage25Cost()
-      },
-      krea2Large: {
-        cost: krea2LargeCost,
-        styleReferenceCost: krea2LargeStyleReferenceCost,
-        currency: "USD"
-      },
-      reve21: {
-        costPerImage: reve21CostPerImage,
-        currency: "USD"
       },
       hunyuan3DPro: {
         baseCost: hunyuan3DProBaseCost,
@@ -2332,124 +2316,6 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "fal-reve-2-1") {
-      if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "REVE 2.1 requires an enabled Fal API key in Settings." });
-      }
-
-      const reveImage = await generateFalReve21({
-        prompt,
-        imagePromptUrls,
-        imagePromptLabels,
-        aspectRatio
-      });
-      const output = await downloadImage(req, reveImage.remoteImage.url, "reve-2-1", reveImage.remoteImage.content_type || reveImage.remoteImage.mimeType);
-      const cost = estimateReve21ImageCost({ endpoint: reveImage.endpoint });
-
-      await appendHistory({
-        id: reveImage.requestId || randomUUID(),
-        createdAt: new Date().toISOString(),
-        mediaType: "image",
-        provider: "fal.ai",
-        modelName: selectedModel.displayName,
-        endpoint: reveImage.endpoint,
-        mode: "REVE 2.1 " + reveImage.mode,
-        prompt,
-        submittedPrompt: reveImage.submittedPrompt,
-        project: projectFromBody(req.body),
-        node: nodeFromBody(req.body),
-        settings: {
-          model: req.body.model || selectedModel.displayName,
-          aspectRatio,
-          requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: "4K",
-          imagePromptCount: reveImage.referenceCount,
-          imagePromptLabels: reveImage.referenceLabels
-        },
-        cost,
-        remoteImage: reveImage.remoteImage,
-        localImage: output.publicPath,
-        localThumbnail: output.thumbnailPublicPath,
-        outputFileName: output.fileName,
-        outputBytes: output.bytes,
-        text: reveImage.resultText || ""
-      });
-
-      return res.json({
-        text: reveImage.resultText || "",
-        cost,
-        image: {
-          ...reveImage.remoteImage,
-          localUrl: output.publicPath,
-          thumbnailUrl: output.thumbnailPublicPath,
-          fileName: output.fileName,
-          mimeType: output.mimeType
-        }
-      });
-    }
-
-    if (selectedModel.provider === "fal-krea-2-large") {
-      if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
-      }
-
-      const kreaImage = await generateFalKrea2Large({
-        prompt,
-        imagePromptUrls,
-        imagePromptLabels,
-        aspectRatio,
-        creativity: req.body.kreaCreativity
-      });
-      const output = await downloadImage(req, kreaImage.remoteImage.url, "krea-2-large", kreaImage.remoteImage.content_type || kreaImage.remoteImage.mimeType);
-      const cost = estimateKrea2LargeCost({
-        endpoint: kreaImage.endpoint,
-        creativity: kreaImage.creativity,
-        imageStyleReferenceCount: kreaImage.imageStyleReferenceCount
-      });
-
-      await appendHistory({
-        id: kreaImage.requestId || randomUUID(),
-        createdAt: new Date().toISOString(),
-        mediaType: "image",
-        provider: "fal.ai",
-        modelName: selectedModel.displayName,
-        endpoint: kreaImage.endpoint,
-        mode: kreaImage.imageStyleReferenceCount ? "Krea 2 Large generation with style references" : "Krea 2 Large generation",
-        prompt,
-        submittedPrompt: kreaImage.submittedPrompt,
-        project: projectFromBody(req.body),
-        node: nodeFromBody(req.body),
-        settings: {
-          model: req.body.model || selectedModel.displayName,
-          aspectRatio,
-          requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          creativity: kreaImage.creativity,
-          imagePromptCount: imagePromptUrls.length,
-          imageStyleReferenceCount: kreaImage.imageStyleReferenceCount,
-          imagePromptLabels: cleanReferenceLabels
-        },
-        cost,
-        remoteImage: kreaImage.remoteImage,
-        localImage: output.publicPath,
-        localThumbnail: output.thumbnailPublicPath,
-        outputFileName: output.fileName,
-        outputBytes: output.bytes,
-        text: kreaImage.resultText || ""
-      });
-
-      return res.json({
-        text: kreaImage.resultText || "",
-        cost,
-        image: {
-          ...kreaImage.remoteImage,
-          localUrl: output.publicPath,
-          thumbnailUrl: output.thumbnailPublicPath,
-          fileName: output.fileName,
-          mimeType: output.mimeType
-        }
-      });
-    }
-
     if (selectedModel.provider === "fal-nano-banana-2") {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
@@ -2726,7 +2592,6 @@ async function runKreaImageModel(
     aspectRatio,
     resolution,
     quality: req.body.quality,
-    creativity: req.body.kreaCreativity,
     background: req.body.background
   });
   const result = await runKreaGeneration({
@@ -2781,9 +2646,6 @@ async function runKreaImageModel(
         ? normalizeOpenAiImage2Quality(req.body.quality)
         : undefined,
       ...(isOpenAiImage25Model(selectedModel.displayName) ? { background: input.background || "auto" } : {}),
-      creativity: selectedModel.displayName === imageModelNames.krea2Large
-        ? normalizeKrea2Creativity(req.body.kreaCreativity)
-        : undefined,
       imagePromptCount: referenceUrls.length,
       imagePromptLabels: cleanReferenceLabels,
       runtimeProvider: "krea"
@@ -2825,6 +2687,7 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
     const planned = await generateStoryboardPlanWithOpenAi({
         sceneDescription,
         frameCount: requestedFrameCount,
+        useStoryboardStyle: req.body.useStoryboardStyle !== false,
         characters: Array.isArray(req.body.characters) ? req.body.characters : [],
         locations: Array.isArray(req.body.locations)
           ? req.body.locations
@@ -2860,10 +2723,12 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
         spatialAnchorUrl: String(req.body.spatialAnchorUrl || "").trim(),
         sceneDescription: String(req.body.sceneDescription || "").trim(),
         framePrompt: String(req.body.framePrompt || req.body.prompt || "").trim(),
+        useStoryboardStyle: req.body.useStoryboardStyle !== false,
         frameNumber: req.body.frameNumber,
         shot: String(req.body.shot || "").trim(),
         angle: String(req.body.angle || "").trim(),
-        notes: String(req.body.notes || "").trim()
+        notes: String(req.body.notes || "").trim(),
+        characterReferences: req.body.characterReferences || []
       };
     const reviewed = qcProvider
       ? await reviewStoryboardFrameWithOpenAi(qcInput)
@@ -6088,9 +5953,6 @@ function normalizeChoice(value, choices, fallback) {
   return choices.includes(normalized) ? normalized : fallback;
 }
 
-function normalizeKrea2Creativity(value) {
-  return normalizeChoice(String(value || "medium").toLowerCase(), krea2CreativityOptions, "medium");
-}
 
 function normalizeHunyuan3DImageViewUrls(body = {}) {
   const viewOrder = ["front", "back", "left", "right", "top", "bottom", "leftFront", "rightFront"];
@@ -7150,7 +7012,8 @@ async function runFolderDialogCommand(command, args) {
 
 async function runFileDialogCommand(command, args) {
   try {
-    const { stdout } = await execFile(command, args, { windowsHide: false, timeout: 120000 });
+    // Save/open dialogs wait for the user's decision, not a process deadline.
+    const { stdout } = await execFile(command, args, { windowsHide: false, timeout: 0 });
     const selectedPath = String(stdout || "").trim();
     if (!selectedPath) {
       const error = new Error("File selection canceled.");
@@ -8799,6 +8662,7 @@ function pageHistorySummaries(items, req) {
 }
 
 async function subscribeFal(endpoint, options = {}, context = {}, client = fal) {
+  const billingKey = process.env.FAL_KEY;
   const startedAt = Date.now();
   const inputSummary = summarizeFalValue(options.input, "input");
   const originalOnEnqueue = options.onEnqueue;
@@ -8880,6 +8744,12 @@ async function subscribeFal(endpoint, options = {}, context = {}, client = fal) 
       output: summarizeFalValue(result?.data, "output"),
       context
     });
+    const billing = generationBillingScope.getStore();
+    if (billing && billingKey && billingKey === process.env.FAL_KEY) {
+      const id = result?.requestId || result?.request_id || requestId;
+      const charge = await providerPricing.falCharge(id, endpoint, billingKey);
+      if (charge) billing.push({ id, endpoint, charge });
+    }
     return result;
   } catch (error) {
     writeFalDebugLog({
@@ -9013,6 +8883,15 @@ function truncateString(value, maxLength) {
 }
 
 async function appendHistory(item) {
+  if (item.provider === "fal.ai" && ["image", "video"].includes(item.mediaType) && item.cost) {
+    const billing = generationBillingScope.getStore() || [];
+    const matches = billing.filter(row => !row.used && row.endpoint === item.endpoint);
+    const settled = matches.find(row => row.id === item.id) || (matches.length === 1 ? matches[0] : null);
+    if (settled) {
+      Object.assign(item.cost, settled.charge, { unitRateUsd: item.cost.units > 0 ? settled.charge.amountUsd / item.cost.units : null });
+      settled.used = true;
+    }
+  }
   const write = historyWriteQueue.then(async () => {
     const history = await readHistory();
     history.unshift(item);
@@ -9534,26 +9413,6 @@ function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint }) {
   };
 }
 
-function estimateKrea2LargeCost({ endpoint, creativity, imageStyleReferenceCount = 0 }) {
-  const hasStyleReferences = Number(imageStyleReferenceCount) > 0;
-  const amountUsd = hasStyleReferences ? krea2LargeStyleReferenceCost : krea2LargeCost;
-  return {
-    amountUsd: roundCurrency(amountUsd),
-    currency: "USD",
-    unitRateUsd: amountUsd,
-    units: 1,
-    unit: "image",
-    mediaType: "image",
-    creativity,
-    imageStyleReferenceCount,
-    pricingBasis: hasStyleReferences
-      ? "Krea 2 Large fal.ai per-image estimate with image_style_references"
-      : "Krea 2 Large fal.ai text-to-image per-image estimate",
-    pricingSource: "fal-model-page-2026-06-24",
-    endpoint
-  };
-}
-
 function estimateTextProcessingCost({ provider, usage = null, helperUsages = [], imageInputs = [], videoInputs = [], hasMainRequest = true, mainMediaType = "text" }) {
   const normalizedProvider = String(provider || "").toLowerCase();
   const mainRequestRate = mainMediaType === "image" ? falVisionTextUnitCost : falTextRequestCost;
@@ -9824,7 +9683,7 @@ async function runTextLlm({
 }
 
 function checkedCreativeLlmResult(result, data, route) {
-  if (/^(film-director|storyboard)-/.test(route) && result.provider === "fal") {
+  if (/^(film-director|storyboard|explore)-/.test(route) && result.provider === "fal") {
     result = { ...result, text: creativeFinalOutputText(result.text) };
   }
   creativeUsageContext.getStore()?.push(result);
@@ -11722,20 +11581,8 @@ function resolveImageModel(model) {
     };
   }
 
-  if (isReve21Model(model)) {
-    return {
-      provider: "fal-reve-2-1",
-      displayName: imageModelNames.reve21,
-      id: falReve21TextEndpoint
-    };
-  }
-
-  if (normalized.includes("krea") && normalized.includes("large")) {
-    return {
-      provider: "fal-krea-2-large",
-      displayName: imageModelNames.krea2Large,
-      id: falKrea2LargeEndpoint
-    };
+  if (normalized && !normalized.includes("nano") && !normalized.includes("gemini")) {
+    throw httpError(400, "Unsupported image model. Choose a supported image model before generating.");
   }
 
   const useGoogleDirect = Boolean(process.env.GOOGLE_API_KEY);
@@ -11993,8 +11840,6 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
-  if (provider === "fal-reve-2-1") return reve21AspectRatios;
-  if (provider === "fal-krea-2-large") return krea2AspectRatios;
   return ["fal-openai-image-2", "fal-openai-image-25"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -12141,7 +11986,8 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
+async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "", useStoryboardStyle = true }) {
+  assertStoryboardCharacterTags(characters);
   const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
@@ -12191,18 +12037,25 @@ Rules:
 8. Generate prompts that describe one frame only, not the whole scene.
 9. Follow editorial sequencing principles where each frame builds on the previous frame.
 10. When a known character appears or is implied in a frame prompt, refer to them with their exact @tag from Known characters. Do not replace @tags with generic character descriptions.
-11. Maintain a compact continuity bible for the scene: fixed environment, lighting source and direction, key recurring objects, wardrobe, and screen geography.
-12. Include the relevant continuity bible details inside each frame prompt so image generations preserve the same world while changing only the shot, action, or discovery.
+11. Maintain a compact continuity bible for the scene: fixed environment, lighting direction, key recurring objects, action/state changes, and screen geography. Known character sheets define identity and baseline wardrobe; do not repeat their appearance in prose.
+12. Include only the relevant non-appearance continuity facts inside each frame prompt so image generations preserve the same world while changing the shot, action, or discovery. Keep explicit clothing interactions/state changes without an outfit catalogue.
 13. If the scene brief includes multiple @tagged characters, keep those identities separate in the shot plan and include each relevant @tag in every frame where that character appears.
-14. When a known location appears in a frame, preserve its exact @tag from Known locations. Use its reference for environment layout, architecture, geography, materials, lighting logic, palette, and recurring set details.
-15. Keep different named locations separate, do not force locations into unrelated frames, and preserve the final storyboard drawing style rather than copying a photographic rendering style.
-16. Maintain side-of-room logic. If a character starts screen-left or screen-right relative to the room, preserve that side unless the action explicitly moves them.
+14. When a known location appears in a frame, preserve its exact @tag from Known locations. Use its reference for environment layout, architecture, geography, lighting direction and recurring set details, interpreted through the rendering mode below.
+15. Keep different named locations separate, do not force locations into unrelated frames, and follow the selected rendering mode rather than copying an asset's rendering style.
+16. Maintain physical side-of-room logic unless action explicitly moves a character. Screen-left/right is camera-relative and can change on an intentional reverse angle; do not swap identities to preserve old screen coordinates.
 17. Between CUTS, vary shot scale and composition with purpose for repeated coverage of the same subject. Matching shot scales of different speakers are valid. Within one continuous CUT, maintain its intended camera movement or locked framing rather than forcing a new angle.
 18. Do not rely on the same background view for every cut. Keep the environment consistent, but change camera distance, angle, foreground/background emphasis, or subject scale so the sequence edits like a real storyboard.
 19. In every frame with two or more visible characters, explicitly state each visible character's exact @tag and basic blocking relationship, such as screen-left, screen-right, foreground, background, facing, or eyeline. Do not rely on pronouns alone.
 20. A storyboard frame is a key visual state, not automatically a whole shot. When one continuous shot includes multiple important action or camera stages, create multiple sequential frames for that same CUT.
 21. Inside a multi-frame CUT, preserve continuous action, camera trajectory, screen direction, and environment geography. Each frame must show a distinct start, transition, or endpoint rather than duplicate the same composition.
 22. When a known prop appears in a frame, preserve its exact @tag from Known props. Use that reference only for the named object, product, wardrobe item, tool, or set dressing, and do not force unrelated props into other frames.
+
+Cast contract:
+${storyboardCastPlanningRules}
+
+Prompt and rendering policy:
+${storyboardPromptPolicy(useStoryboardStyle)}
+Apply this policy to every generated text field: prompt, beat, notes, analysis, and cast position/action/eyeline. Before returning JSON, remove redundant appearance/outfit descriptions of referenced characters from all of these fields while preserving exact @tags, visible/offscreen assignments, actions and blocking. Do not move unwanted descriptions from the prompt into cast metadata or notes.
 
 Return this exact JSON shape:
 {
@@ -12215,8 +12068,9 @@ Return this exact JSON shape:
       "lens": "None, 8mm, 18mm, 35mm, 50mm, 85mm, or 120mm",
       "angle": "None, Macro, Low Angle, High Angle, Extreme High, Bird's Eye View, Extreme Low, Portrait, Profile, or Selfie",
       "beat": "story beat in one sentence",
-      "prompt": "single-frame image prompt, concise but visually complete, including stable environment, lighting, recurring objects, wardrobe, and screen geography details where relevant",
-      "notes": "continuity note in one short phrase; for Director plans begin with CUT N and the keyframe phase"
+      "prompt": "concise single-frame direction: exact character @tags, action/expression, blocking/depth, eyelines, framing and necessary setting/prop state; character references supply appearance and baseline wardrobe",
+      "notes": "continuity note in one short phrase; for Director plans begin with CUT N and the keyframe phase",
+      "cast": [{ "tag": "exact Known character tag without @", "visibility": "visible or offscreen", "position": "screen-left foreground, or outside frame", "action": "this character's action or pose", "eyeline": "direction and target tag, or empty if not relevant" }]
     }
   ]
 }
@@ -12238,7 +12092,7 @@ ${directorExpansionInstruction
   const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage });
   try {
     const plan = parseStoryboardPlanJson(result.text);
-    const issues = storyboardPlanIssues(plan, directorShotList);
+    const issues = [...storyboardPlanIssues(plan, directorShotList), ...storyboardCastPlanIssues(plan.frames, characters)];
     if (issues.length) throw new Error(`Storyboard plan needs correction: ${issues.join(" ")} Existing frames have been preserved.`);
     return { plan, cost, result };
   }
@@ -12314,7 +12168,8 @@ function normalizeStoryboardPlanFrame(frame = {}, index = 0) {
     angle: normalizeChoice(String(frame.angle || "None"), ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"], "None"),
     beat: String(frame.beat || "").trim().slice(0, 240),
     prompt: String(frame.prompt || "").trim().slice(0, 1400),
-    notes: String(frame.notes || "").trim().slice(0, 240)
+    notes: String(frame.notes || "").trim().slice(0, 240),
+    ...(Array.isArray(frame.cast) ? { cast: frame.cast } : {})
   };
 }
 
@@ -12346,6 +12201,7 @@ function storyboardQcReviewPrompt({
   shot = "",
   angle = "",
   notes = "",
+  useStoryboardStyle = true,
   imageLabels = []
 } = {}) {
   return `You are a professional storyboard supervisor reviewing one generated storyboard frame before it becomes a continuity reference.
@@ -12356,7 +12212,7 @@ Review goal:
 - Pass the image if it is broadly usable and physically coherent.
 - Fail for obvious storyboard-breaking problems and weak editorial progression.
 - Do not fail for small style differences, minor line-art imperfections, or harmless model variation.
-- If the frame prompt includes STORYBOARD STYLE LOCK, fail obvious realistic black-and-white photographs, photorealistic grayscale renders, dense tonal realism, heavy shaded realism, or cluttered fully rendered backgrounds. Request a cleaner minimal black ink line drawing with simple gray blocking.
+- ${useStoryboardStyle !== false ? "Fail obvious colored output, realistic black-and-white photographs, photorealistic grayscale renders, dense tonal realism or cluttered fully rendered backgrounds. Request a cleaner minimal black ink line drawing with simple gray blocking. Never fail a monochrome board for not matching the colors of its references or source prose, and never request those colors in a correction." : "Evaluate against the user's chosen custom style. Color and photographic rendering are allowed when that style calls for them; do not demand black-and-white line art."}
 
 Current frame:
 Frame ${frameNumber || 1}
@@ -12371,8 +12227,13 @@ ${sceneDescription || "No scene description provided."}
 Frame notes:
 ${notes || "None"}
 
+Prompt and rendering policy:
+${storyboardPromptPolicy(useStoryboardStyle)}
+In issues and correctionPrompt, identify referenced characters by exact @tags and their assigned sheets, not new physical descriptions or wardrobe/color catalogues. Request a match to the correct named sheet and fix only the failed action, blocking, identity assignment or rendering. Do not undo an explicit clothing interaction or story-state change just to restore the reference's baseline outfit.
+
 Uploaded image order:
 ${imageLabels.length ? imageLabels.map((label, index) => `${index + 1}. ${label}`).join("\n") : "1. Generated frame to review"}
+Use this uploaded order for review. Generation-reference numbers quoted inside the frame prompt describe the generator's original inputs, not the review images. Match original identities by their @tag labels.
 
 Check for these problems:
 1. Physical logic errors: floating objects, impossible contact points, impossible object placement, broken perspective, major anatomy failures.
@@ -12381,7 +12242,8 @@ Check for these problems:
 4. Shot progression: judge the requested frame, not an invented camera move. Within a continuous CUT, the same scale/composition is valid when the action state changes or the camera remains locked. Between cuts, check a requested scale change is visible; matching close-ups of different speakers are valid. Do not force a tighter frame or new angle that contradicts the current prompt.
 5. Background variety with continuity: different shots may share the same environment, but should not keep showing the exact same background from the exact same camera unless the prompt calls for a locked-off repeat.
 6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props.
-7. Storyboard style: when STORYBOARD STYLE LOCK is present, the frame should read as clean minimal line-art production boards, not realistic grayscale photography.
+7. Rendering: apply the explicit rendering policy above, even if an old prompt or source reference describes a different look.
+8. Cast audit: compare each visible tagged character against that tag's original identity sheet. Multiple views in a sheet are ONE person. Check for a duplicated person replacing another, blended faces or wardrobe, extra people, missing visible cast, and an offscreen person incorrectly shown. Compare the exact tag-to-position, foreground/background depth, action, prop ownership and eyeline assignments in FRAME CAST AND BLOCKING. A clearly wrong identity or swapped assignment is a major failure, not harmless variation. Do not require an offscreen person's face, or a visible face on a back view/foreground shoulder. Judge stylized line-art likeness by available distinctive features, not photographic detail. Original identity sheets outrank earlier frames; the current frame's camera-relative blocking outranks a prior shot's screen coordinates. Never require every character mentioned in the full scene to appear in this frame. A correction must name the affected @tags and their correct positions, without swapping their reference bindings.
 
 Return this exact JSON shape:
 {
@@ -12405,10 +12267,13 @@ async function reviewStoryboardFrameWithOpenAi({
   frameNumber = 1,
   shot = "",
   angle = "",
-  notes = ""
+  notes = "",
+  useStoryboardStyle = true,
+  characterReferences = []
 } = {}) {
   const inputs = [
     sourceUrl ? { url: sourceUrl, label: "Generated frame to review" } : null,
+    ...storyboardQcCharacterInputs(characterReferences),
     previousFrameUrl ? { url: previousFrameUrl, label: "Previous approved frame for continuity" } : null,
     spatialAnchorUrl ? { url: spatialAnchorUrl, label: "Spatial anchor frame for room geography" } : null
   ].filter(Boolean);
@@ -12420,6 +12285,7 @@ async function reviewStoryboardFrameWithOpenAi({
     shot,
     angle,
     notes,
+    useStoryboardStyle,
     imageLabels: inputs.map((item) => item.label)
   });
   const result = await runMediaDescriptionLlm({
@@ -13309,95 +13175,6 @@ async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLa
     thinkingLevel: nanoBananaProFalThinkingMode,
     submittedPrompt: input.prompt,
     description: result?.data?.description || result?.data?.text || ""
-  };
-}
-
-async function generateFalKrea2Large({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, creativity }) {
-  const imageInputs = [];
-
-  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
-    const asset = await readLocalAsset(imagePromptUrl);
-    if (!asset.mimeType.startsWith("image/")) continue;
-    imageInputs.push({
-      ...asset,
-      label: cleanImagePromptLabel(imagePromptLabels[index])
-    });
-  }
-
-  const styleReferences = await Promise.all(
-    imageInputs.slice(0, 10).map(async (asset, index) => ({
-      image_url: await uploadImageInputToFal(asset, index)
-    }))
-  );
-  const normalizedCreativity = normalizeKrea2Creativity(creativity);
-  const input = {
-    prompt: promptWithReferenceLabels(prompt, imageInputs),
-    aspect_ratio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-krea-2-large"),
-    creativity: normalizedCreativity,
-    image_style_references: styleReferences,
-    styles: [],
-    moodboards: []
-  };
-
-  const result = await subscribeFal(falKrea2LargeEndpoint, { input, logs: true });
-  const remoteImage = firstFalImageResult(result?.data);
-
-  if (!remoteImage?.url) {
-    throw new Error("Fal returned no Krea 2 Large image URL.");
-  }
-
-  return {
-    endpoint: falKrea2LargeEndpoint,
-    requestId: result.requestId,
-    remoteImage,
-    creativity: normalizedCreativity,
-    imageStyleReferenceCount: styleReferences.length,
-    submittedPrompt: input.prompt,
-    resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
-  };
-}
-
-async function generateFalReve21({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio }) {
-  const imageInputs = [];
-
-  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
-    const asset = await readLocalAsset(imagePromptUrl);
-    if (!asset.mimeType.startsWith("image/")) continue;
-    imageInputs.push({
-      ...asset,
-      label: cleanImagePromptLabel(imagePromptLabels[index])
-    });
-  }
-
-  const references = imageInputs.slice(0, 8);
-  const imageUrls = await Promise.all(references.map(uploadImageInputToFal));
-  const request = buildReve21FalRequest({
-    prompt,
-    imageUrls,
-    imageLabels: references.map((item) => item.label),
-    aspectRatio
-  });
-  const endpoint = request.mode === "edit"
-    ? falReve21EditEndpoint
-    : request.mode === "remix"
-      ? falReve21RemixEndpoint
-      : falReve21TextEndpoint;
-  const result = await subscribeFal(endpoint, { input: request.input, logs: true });
-  const remoteImage = firstFalImageResult(result?.data);
-
-  if (!remoteImage?.url) {
-    throw new Error("Fal returned no REVE 2.1 image URL.");
-  }
-
-  return {
-    endpoint,
-    requestId: result?.requestId || result?.request_id || "",
-    remoteImage,
-    mode: request.mode,
-    referenceCount: request.referenceCount,
-    referenceLabels: request.referenceLabels,
-    submittedPrompt: request.submittedPrompt,
-    resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
   };
 }
 

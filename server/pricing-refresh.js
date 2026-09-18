@@ -1,39 +1,30 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "./json-store.js";
 import { ATLAS_PRICING_URL, parseAtlasPricing } from "./atlas-pricing.js";
+import { atlasPricingSpecs, atlasSeedanceEstimateEndpoints, atlasPricingEndpoints } from "../src/atlasPricing.js";
+import { priceState, PRICE_REFRESH_MS } from "../src/pricingTrust.js";
 import {
-  FAL_PRICING_URL, GOOGLE_PRICING_URL, KREA_PRICING_URL, OPENAI_PRICING_URL,
-  falFixedPricing, falPricingEndpoints, googlePricingTables, parseFalPricing, parseKreaPricing,
+  KREA_PRICING_URL, OPENAI_PRICING_URL,
+  kreaPricingModels, parseKreaPricing,
   parseOpenAiPricing, pointKey, validatePricingEntry
 } from "./pricing-sources.js";
 
 const HOUR = 3600000;
-const eastern = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hourCycle: "h23" });
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const iso = (value) => new Date(value).toISOString();
-const blank = () => ({ version: 1, enabled: true, revision: "bundled", entries: {}, sources: {}, changes: [], lastCheckAt: null, lastScheduledSlot: null });
+const autoRefreshPreferenceVersion = 1;
+const blank = () => ({ version: 1, enabled: false, autoRefreshPreferenceVersion, revision: "bundled", entries: {}, sources: {}, changes: [], lastCheckAt: null, lastScheduledSlot: null });
 
-export function latestPricingSlot(now) {
-  for (let time = Math.floor(now / HOUR) * HOUR, n = 0; n < 170; n++, time -= HOUR) {
-    const parts = Object.fromEntries(eastern.formatToParts(time).map((part) => [part.type, part.value]));
-    if (parts.weekday === "Mon" && parts.hour === "04") return time;
-  }
-  throw new Error("Could not resolve weekly Eastern pricing schedule.");
-}
-
-export function nextPricingSlot(now) {
-  let time = Math.floor(now / HOUR) * HOUR + HOUR;
-  for (let n = 0; n < 170; n++, time += HOUR) {
-    const parts = Object.fromEntries(eastern.formatToParts(time).map((part) => [part.type, part.value]));
-    if (parts.weekday === "Mon" && parts.hour === "04") return time;
-  }
-  throw new Error("Could not resolve next pricing schedule.");
-}
+const supportedPricingEntry = (id) => id.startsWith("openai:")
+  || kreaPricingModels.some(([endpoint]) => id === `krea:${endpoint}`)
+  || [...atlasPricingEndpoints, "openai/gpt-6-astra", "openai/gpt-5.6-luna"].some(endpoint => id === `atlas:${endpoint}`);
 
 export class PricingRefresh {
-  constructor({ filePath, getFalKey = () => "", refreshKeys = async () => {}, fetchImpl = fetch, now = Date.now, write = writeJsonAtomic, enableAtlasPricing = false }) {
-    Object.assign(this, { filePath, getFalKey, refreshKeys, fetchImpl, now, write, enableAtlasPricing });
+  constructor({ filePath, getFalKey = () => "", getProviderKey = () => "", getEnabledProviders, refreshKeys = async () => {}, fetchImpl = fetch, now = Date.now, write = writeJsonAtomic, enableAtlasPricing = false }) {
+    Object.assign(this, { filePath, getFalKey, getProviderKey, refreshKeys, fetchImpl, now, write, enableAtlasPricing });
+    this.getEnabledProviders = getEnabledProviders || (() => ({ krea: true, openai: true, atlas: enableAtlasPricing, fal: Boolean(getFalKey()) }));
+    this.accountRevision = randomUUID(); this.credentialSignature = ""; this.progress = null;
     this.state = blank(); this.running = null; this.timer = null; this.error = ""; this.lastFailureAt = -Infinity;
     this.settingsQueue = Promise.resolve();
     this.ready = this.load();
@@ -50,33 +41,65 @@ export class PricingRefresh {
         || [state.lastCheckAt, state.lastScheduledSlot, state.retryAt].some((value) => value != null && !Number.isFinite(Date.parse(value)))) {
         throw new Error("Invalid stored pricing catalog.");
       }
+      state.entries = Object.fromEntries(Object.entries(state.entries).filter(([id]) => supportedPricingEntry(id)));
       for (const [id, entry] of Object.entries(state.entries)) {
         if (!/^(fal|krea|openai|atlas):/.test(id)) throw new Error("Invalid stored pricing provider.");
         validatePricingEntry(entry);
       }
+      for (const [provider, source] of Object.entries(state.sources)) {
+        if (provider === "fal") { delete state.sources[provider]; continue; }
+        if (["krea", "atlas"].includes(provider) && source.reviews) {
+          source.reviews = source.reviews.filter(review => provider === "krea"
+            ? kreaPricingModels.some(([endpoint]) => endpoint.split("/").slice(3).join("/") === review.model)
+            : supportedPricingEntry(`atlas:${review.model}`));
+        }
+        if (source.observations) source.observations = Object.fromEntries(Object.entries(source.observations).filter(([id]) => supportedPricingEntry(id)));
+      }
       this.state = { ...blank(), ...state };
+      // Apply the opt-in default once on upgrade, then retain the user's choice.
+      if (state.autoRefreshPreferenceVersion !== autoRefreshPreferenceVersion) {
+        this.state = { ...this.state, enabled: false, autoRefreshPreferenceVersion, retryAt: null, retryCount: 0 };
+        try { await this.write(this.filePath, this.state, { mode: 0o600 }); }
+        catch { this.error = "Auto refresh is off, but the preference could not be saved."; }
+      }
     } catch (error) {
       if (error.code !== "ENOENT") this.error = "Saved pricing could not be read. Bundled estimates are in use until a successful refresh.";
     }
   }
 
-  account() { const key = this.getFalKey(); return key ? hash(`newtnode-pricing:${key}`) : null; }
 
-  catalog() {
-    const account = this.account();
-    const entries = Object.fromEntries(Object.entries(this.state.entries).filter(([id]) => !id.startsWith("fal:") || (account && account === this.state.falAccount)));
-    return { version: 1, revision: `${this.state.revision}:${account ? (account === this.state.falAccount ? "fal" : "new-account") : "no-fal"}`, entries };
+  accounts() {
+    const enabled = this.getEnabledProviders();
+    const signature = hash(JSON.stringify([enabled, this.getFalKey(), this.getProviderKey("atlas")]));
+    if (signature !== this.credentialSignature) { this.credentialSignature = signature; this.accountRevision = randomUUID(); }
+    return this.accountRevision;
   }
 
+  catalog() {
+    const enabled = this.getEnabledProviders(), accountRevision = this.accounts();
+    const entries = Object.fromEntries(Object.entries(this.state.entries).filter(([id]) => supportedPricingEntry(id) && enabled[id.split(":")[0]]));
+    return { version: 1, policyVersion: 2, accountRevision,
+      revision: `${this.state.revision}:${accountRevision}:${Math.floor(this.now() / HOUR)}`, entries };
+  }
+
+  snapshot() { return { ...this.catalog(), capturedAt: iso(this.now()) }; }
+
   status() {
-    const sources = structuredClone(this.state.sources);
-    if (!this.account() || this.account() !== this.state.falAccount) sources.fal = {
-      status: "unavailable", message: this.account() ? "This Fal key has not been checked. Using bundled estimates." : "Fal is disabled or has no active key. Using bundled estimates.",
-      checkedAt: null, applied: 0, reviews: []
-    };
+    const sources = structuredClone(this.progress || this.state.sources);
+    const enabled = this.getEnabledProviders();
+    for (const provider of ["krea", "atlas", "fal", "openai", "google"]) {
+      if (!enabled[provider]) { sources[provider] = { status: "disabled", applied: 0, reviews: [] }; continue; }
+      if (provider === "google" || provider === "fal") { sources[provider] = { status: "bundled", applied: 0, reviews: [] }; continue; }
+      const source = sources[provider] ||= { status: "pending", applied: 0, reviews: [] };
+      const entries = Object.entries(this.catalog().entries).filter(([id]) => id.startsWith(`${provider}:`)).map(([, value]) => value);
+      source.current = entries.filter(entry => priceState(entry, this.now()) === "current").length;
+      source.stale = entries.filter(entry => priceState(entry, this.now()) === "stale").length;
+      source.unavailable = entries.filter(entry => ["expired", "unavailable"].includes(priceState(entry, this.now()))).length;
+      if (source.status === "current" && (source.stale || source.unavailable)) source.status = "stale";
+    }
     return {
-      enabled: this.state.enabled, running: Boolean(this.running), schedule: "Monday, 4:00 AM Eastern", timeZone: "America/New_York",
-      nextCheckAt: this.state.retryAt || iso(nextPricingSlot(this.now())), lastCheckAt: this.state.lastCheckAt, error: this.error,
+      enabled: this.state.enabled, running: Boolean(this.running), schedule: "Daily freshness check",
+      nextCheckAt: this.state.enabled ? this.state.retryAt || (this.state.lastCheckAt ? iso(Date.parse(this.state.lastCheckAt) + PRICE_REFRESH_MS) : null) : null, lastCheckAt: this.state.lastCheckAt, error: this.error,
       sources, changes: this.state.changes, catalog: this.catalog()
     };
   }
@@ -92,7 +115,18 @@ export class PricingRefresh {
   async tick() {
     await this.ready;
     if (!this.state.enabled || this.running || this.now() - this.lastFailureAt < HOUR) return;
-    if (this.state.lastScheduledSlot !== iso(latestPricingSlot(this.now())) || (this.state.retryAt && Date.parse(this.state.retryAt) <= this.now())) await this.refresh();
+    const due = !this.state.lastCheckAt || this.now() - Date.parse(this.state.lastCheckAt) >= PRICE_REFRESH_MS;
+    if (due || (this.state.retryAt && Date.parse(this.state.retryAt) <= this.now())) await this.refresh();
+  }
+
+  async ensureFresh() {
+    await this.ready;
+    if (!this.state.enabled) return;
+    const enabled = this.getEnabledProviders();
+    const unchecked = ["krea", "atlas", "openai"].some(provider => enabled[provider]
+      && (!this.state.sources[provider]?.checkedAt && !this.state.sources[provider]?.attemptedAt));
+    if (unchecked && (!this.state.lastCheckAt || this.now() - Date.parse(this.state.lastCheckAt) >= HOUR)) return this.refresh();
+    return this.tick();
   }
 
   setEnabled(enabled) {
@@ -123,56 +157,33 @@ export class PricingRefresh {
     return Buffer.concat(chunks).toString("utf8");
   }
 
-  async falResults(key) {
-    const prices = [];
-    const url = new URL(FAL_PRICING_URL);
-    for (const endpoint of falPricingEndpoints) url.searchParams.append("endpoint_id", endpoint);
-    const seen = new Set();
-    for (let page = 0; page < 5; page++) {
-      const result = JSON.parse(await this.read(url, { Authorization: `Key ${key}` }));
-      if (!Array.isArray(result.prices)) throw new Error("Invalid Fal price response.");
-      prices.push(...result.prices);
-      if (!result.has_more) return parseFalPricing({ prices });
-      if (!result.next_cursor || seen.has(result.next_cursor)) throw new Error("Invalid Fal pagination.");
-      seen.add(result.next_cursor); url.searchParams.set("cursor", result.next_cursor);
-    }
-    throw new Error("Fal pricing pagination exceeded its limit.");
-  }
-
   refresh() {
     if (this.running) return this.running;
     this.running = this.settingsQueue.catch(() => {}).then(() => this.performRefresh()).catch((error) => {
       this.lastFailureAt = this.now(); this.error = "Pricing refresh could not be saved or completed. Existing rates retained.";
       throw error;
-    }).finally(() => { this.running = null; });
+    }).finally(() => { this.running = null; this.progress = null; });
     return this.running;
   }
 
   async performRefresh() {
     await this.ready; await this.refreshKeys();
-    const started = this.now(), checkedAt = iso(started), key = this.getFalKey(), account = this.account();
-    const next = structuredClone(this.state), changes = [];
-    if (next.falAccount !== account) {
-      for (const id of Object.keys(next.entries)) if (id.startsWith("fal:")) delete next.entries[id];
-      next.falAccount = account;
-    }
+    const started = this.now(), checkedAt = iso(started);
+    const next = structuredClone(this.state), changes = [], enabled = this.getEnabledProviders();
+    this.progress = {};
     const tasks = [
-      ...(this.enableAtlasPricing ? [["atlas", async () => parseAtlasPricing(JSON.parse(await this.read(ATLAS_PRICING_URL)))]] : []),
-      ["krea", async () => parseKreaPricing(JSON.parse(await this.read(KREA_PRICING_URL)))],
-      ["openai", async () => parseOpenAiPricing(await this.read(OPENAI_PRICING_URL))],
-      ["fal", async () => key ? this.falResults(key) : null],
-      ["google", async () => {
-        const digest = hash(JSON.stringify(googlePricingTables(await this.read(GOOGLE_PRICING_URL))));
-        const changed = next.sources.google?.digest && next.sources.google.digest !== digest;
-        return [{ id: "google:direct-images", label: "Direct Google image pricing", digest, source: GOOGLE_PRICING_URL,
-          issue: changed ? "Published pricing tables changed. Direct Google billing needs review; existing estimates retained."
-            : "Published pricing tables checked. Token-based image billing needs review before automatic updates." }];
-      }]
+      ...(this.enableAtlasPricing ? [["atlas", async () => parseAtlasPricing(JSON.parse(await this.read(ATLAS_PRICING_URL))).filter(result => {
+        const endpoint = result.id.slice(6);
+        return atlasPricingSpecs[endpoint] || atlasSeedanceEstimateEndpoints.includes(endpoint) || ["openai/gpt-6-astra", "openai/gpt-5.6-luna"].includes(endpoint);
+      })]] : []),
+      ["krea", async () => parseKreaPricing(JSON.parse(await this.read(KREA_PRICING_URL))).filter(result => kreaPricingModels.find(([endpoint]) => `krea:${endpoint}` === result.id)?.[1])],
+      ["openai", async () => parseOpenAiPricing(await this.read(OPENAI_PRICING_URL))]
     ];
     for (const [provider, read] of tasks) {
+      if (!enabled[provider]) { next.sources[provider] = { status: "disabled", applied: 0, reviews: [] }; this.progress[provider] = next.sources[provider]; continue; }
+      this.progress[provider] = { status: "checking", applied: 0, reviews: [] };
       try {
         const results = await read();
-        if (!results) { next.sources[provider] = { status: "unavailable", message: "No enabled API key.", checkedAt: null, applied: 0, reviews: [] }; continue; }
         const reviews = []; let applied = 0;
         for (const result of results) {
           const previous = next.entries[result.id];
@@ -182,31 +193,29 @@ export class PricingRefresh {
           }
           try {
             if (result.issue) throw new Error(result.issue);
-            const baseline = falFixedPricing[result.id.slice(4)];
-            const comparison = previous || (provider === "fal" && baseline ? { unit: baseline.unit, points: [{ dimensions: {}, amount: baseline.baseline }] } : null);
-            const entry = validatePricingEntry(result.entry, comparison);
+            const entry = validatePricingEntry(result.entry, previous);
             const altered = entry.points.filter((point) => previous?.points.find((old) => pointKey(old) === pointKey(point))?.amount !== point.amount).length;
             if (altered) changes.push({ at: checkedAt, model: result.label, provider, action: previous ? "Updated" : "Verified", pricePoints: altered });
             next.entries[result.id] = { ...entry, checkedAt };
             applied++;
-          } catch (error) { reviews.push({ model: result.label, message: error.message, source: result.source }); }
+          } catch (error) {
+            reviews.push({ model: result.label, message: error.message, source: result.source });
+            if (previous) next.entries[result.id] = { ...previous, invalidatedAt: checkedAt };
+          }
         }
         next.sources[provider] = { status: reviews.length ? "partial" : "current", checkedAt, applied, reviews,
           observations: Object.fromEntries(results.filter((item) => item.observed).map((item) => [item.id, item.observed])),
           ...(results[0]?.digest ? { digest: results[0].digest } : {}) };
       } catch (error) {
-        next.sources[provider] = { ...next.sources[provider], status: "error", attemptedAt: checkedAt,
-          message: error.message.startsWith("Pricing source") ? error.message : "Could not verify the published prices. Existing rates retained." };
+        for (const [id, entry] of Object.entries(next.entries)) if (id.startsWith(`${provider}:`)) next.entries[id] = { ...entry, verificationFailed: true };
+        next.sources[provider] = { status: "error", checkedAt: next.sources[provider]?.checkedAt, applied: 0, reviews: [], attemptedAt: checkedAt,
+          message: error.message.startsWith("Pricing source") ? error.message : "Could not verify prices. Older estimates expire after seven days." };
       }
-    }
-    // Never publish a quote fetched for a key that was replaced during this check.
-    if (account !== this.account()) {
-      for (const id of Object.keys(next.entries)) if (id.startsWith("fal:")) delete next.entries[id];
-      next.falAccount = null;
+      this.progress[provider] = next.sources[provider];
     }
     next.revision = `${checkedAt}:${hash(JSON.stringify(next.entries)).slice(0, 12)}`;
-    next.lastCheckAt = checkedAt; next.lastScheduledSlot = iso(latestPricingSlot(started));
-    const retryCount = this.state.lastScheduledSlot === next.lastScheduledSlot ? (this.state.retryCount || 0) : 0;
+    next.lastCheckAt = checkedAt;
+    const retryCount = this.state.lastCheckAt && started - Date.parse(this.state.lastCheckAt) < PRICE_REFRESH_MS ? (this.state.retryCount || 0) : 0;
     const failed = Object.values(next.sources).some((source) => source.status === "error");
     next.retryCount = failed ? retryCount + 1 : 0;
     next.retryAt = failed && next.retryCount <= 3 ? iso(this.now() + HOUR) : null;

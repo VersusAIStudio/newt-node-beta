@@ -31,8 +31,6 @@ import {
   firstEnabledVideoModel,
   imageModelNames,
   imageResolutionOptions,
-  krea2AspectRatios,
-  krea2CreativityOptions,
   klingO34kAspectRatioOptions,
   klingO34kDurationOptions,
   klingO34kResolutionOptions,
@@ -41,8 +39,6 @@ import {
   klingO3ProResolutionOptions,
   nanoImageAspectRatios,
   openAiImageAspectRatios,
-  reve21AspectRatios,
-  reve21ResolutionOptions,
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
   seedance25ResolutionOptions,
@@ -53,9 +49,8 @@ import {
   videoModelNames
 } from "./modelOptions.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
-import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25KreaAspectRatios, openAiImage25KreaSelection, openAiImage25QualityOptions, openAiImage25BackgroundOptions } from "./openAiImage25.js";
+import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions, openAiImage25KreaSelection, openAiImage25QualityOptions, openAiImage25BackgroundOptions } from "./openAiImage25.js";
 import { generationProviderFromSettings } from "./generationPricing.js";
-import { isReve21Model } from "./reve21.js";
 import { isSeedance25Model } from "./seedance25.js";
 import {
   isMiniMaxH3Model,
@@ -148,7 +143,6 @@ function App() {
   const [imageBackground, setImageBackground] = React.useState("auto");
   const [imageProvider, setImageProvider] = React.useState("fal");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
-  const [imageKreaCreativity, setImageKreaCreativity] = React.useState("raw");
   const [imageStatus, setImageStatus] = React.useState("idle");
   const [imageMessage, setImageMessage] = React.useState("");
   const [imageResult, setImageResult] = React.useState([]);
@@ -382,7 +376,6 @@ function App() {
         aspectRatio: imageAspectRatio,
         resolution: imageResolution,
         ...(isOpenAiImage25Model(imageModel) ? { quality: imageQuality, background: imageBackground } : {}),
-        kreaCreativity: imageKreaCreativity,
         imagePromptUrls,
         projectId: "image",
         projectName: "Image",
@@ -585,10 +578,6 @@ function App() {
                 {isOpenAiImage25Model(imageModel) && <SelectChip value={imageQuality} options={openAiImage25QualityOptions} onChange={setImageQuality} formatter={(value) => ({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]} />}
                 {isOpenAiImage25Model(imageModel) && !(imageProvider === "krea" && openAiImage25Variant(imageModel) === "sunburst") && <SelectChip value={imageBackground} options={openAiImage25BackgroundOptions} onChange={setImageBackground} formatter={(value) => `${value.charAt(0).toUpperCase()}${value.slice(1)}`} />}
 
-                {isKrea2LargeImageModel(imageModel) && (
-                  <SelectChip value={imageKreaCreativity} options={krea2CreativityOptions} onChange={setImageKreaCreativity} formatter={formatKrea2Creativity} />
-                )}
-
                 <SelectChip icon={<Sparkles size={16} />} value={imageBatchCount} options={batchOptions} onChange={setImageBatchCount} formatter={formatBatchCount} />
 
                 <ReferenceChip count={imageReferences.length} onSelect={addImageReferences} />
@@ -605,7 +594,6 @@ function App() {
 
             <div className="route-strip">
               <span>{imageModel}</span>
-              {isKrea2LargeImageModel(imageModel) && <span>{`Creativity ${formatKrea2Creativity(imageKreaCreativity)}`}</span>}
               <span>{formatBatchCount(Number(imageBatchCount))}</span>
               <span>{imageResolution}</span>
               <span>{imageAspectRatio}</span>
@@ -1022,26 +1010,13 @@ function isImageWorkspaceHistory(item) {
 }
 
 function imageAspectRatiosForModel(model) {
-  if (isReve21Model(model)) return reve21AspectRatios;
-  if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
-  return model === imageModelNames.openAiImage2 ? openAiImageAspectRatios : nanoImageAspectRatios;
-}
-
-function isKrea2LargeImageModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("krea") && normalized.includes("large");
+  return model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function imageResolutionOptionsForModel(model, provider = "fal") {
-  if (provider === "krea" && isOpenAiImage25Model(model)) return ["1K"];
-  if (isReve21Model(model)) return reve21ResolutionOptions;
+  if (provider === "krea" && isOpenAiImage25Model(model)) return openAiImage25KreaResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;
-}
-
-function formatKrea2Creativity(value) {
-  const text = krea2CreativityOptions.includes(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "raw";
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
 function videoSettingsForModel(model) {

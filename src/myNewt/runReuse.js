@@ -1,4 +1,5 @@
 import { myNewtFields } from "./contract.js";
+import { isCoverageNode } from "../coveragePresets.js";
 import { myNewtOutputItems } from "./plan.js";
 import { smartTextGenerationContext, smartTextPromptVersion } from "../smartTextPrompt.js";
 
@@ -25,7 +26,7 @@ function stableData(value) {
 
 export async function myNewtRunInputDigest(snapshot, nodeId, stage, preview = {}) {
   const node = snapshot.nodes.find((item) => item.id === nodeId);
-  if (!node || !reusableTypes.has(node.type)) return null;
+  if (!node || (!reusableTypes.has(node.type) && !isCoverageNode(node))) return null;
   const inputs = Object.fromEntries((myNewtFields[node.type] || []).map((key) => [key, node.data?.[key]]));
   // Media previews contain resolved prompts, settings and the actual selected references.
   // Text has no equivalent preview, so include its complete upstream dependency graph.
@@ -51,10 +52,10 @@ export async function myNewtRunInputDigest(snapshot, nodeId, stage, preview = {}
 }
 
 export async function myNewtRunOutputDigest(node) {
-  if (!node || !reusableTypes.has(node.type) || node.data?.error || ["running", "planning", "compiling", "uploading", "generating", "error"].includes(node.data?.status)) return null;
+  if (!node || (!reusableTypes.has(node.type) && !isCoverageNode(node)) || node.data?.error || ["running", "planning", "compiling", "uploading", "generating", "error"].includes(node.data?.status)) return null;
   if (node.type === "text") return node.data?.resultText?.trim() ? myNewtDigest({ text: node.data.resultText }) : null;
   const outputs = myNewtOutputItems(node);
-  const expectedCount = node.type === "coverage" ? 9 : Math.max(1, Number(node.data?.batchCount) || 1);
+  const expectedCount = isCoverageNode(node) ? 9 : Math.max(1, Number(node.data?.batchCount) || 1);
   return outputs.length >= expectedCount ? myNewtDigest(outputs.map(({ url, type }) => ({ url, type }))) : null;
 }
 

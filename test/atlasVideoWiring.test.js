@@ -21,6 +21,7 @@ async function setup(t, width = 600) {
   };
   const probeVideoFile = t.mock.fn(async () => { throw new Error("Image references must use Sharp, not the video probe"); });
   const deps = {
+    providerPricing: { atlasInput: async () => null },
     sharp, createAtlasMedia, validateAtlasVideoAssets, createAtlasClient: () => client,
     readLocalAsset: async () => asset,
     resolveLocalAssetPath: async () => ({ filePath: "/unused/reference.png" }),

@@ -1,5 +1,8 @@
 import React from "react";
-import { createEditorTimeline, normalizeEditorTimeline, editorRenderSignature } from "./editorTimeline.js";
+import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
+import { runExploreGeneration } from "./nodeRunners/explore.js";
+const ExploreNodeBody = React.lazy(() => import("./components/ExploreNodeBody.jsx").then(module => ({ default: module.ExploreNodeBody })));
+import { createEditorTimeline, normalizeEditorTimeline, editorRenderSignature, editorZoomStep } from "./editorTimeline.js";
 const EditorNodeBody = React.lazy(() => import("./components/EditorNodeBody.jsx").then(module => ({ default: module.EditorNodeBody })));
 const EditorMonitor = React.lazy(() => import("./components/EditorMonitor.jsx").then(module => ({ default: module.EditorMonitor })));
 import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
@@ -16,6 +19,7 @@ import { buildMyNewtDuplicateGraph } from "./myNewt/localCopies.js";
 import { useNewtPresets } from "./myNewt/useNewtPresets.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./myNewt/presets.js";
 import { NewtPresetDialog } from "./components/NewtPresetDialog.jsx";
+import { PresetWorkflowPicker } from "./components/PresetWorkflowPicker.jsx";
 import { keepSingleMyNewt, myNewtDefaults, myNewtFields, myNewtRunStages, validateMyNewtPatch } from "./myNewt/contract.js";
 import {
   Aperture,
@@ -61,7 +65,7 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { composerApi, historyApi, nodeApi, settingsApi, systemApi } from "./api/newtApi.js";
+import { historyApi, nodeApi, settingsApi, systemApi } from "./api/newtApi.js";
 import { usePricingRevision } from "./usePricing.js";
 import { notifyGenerationTaskComplete, shouldNotifyNodeGenerationComplete } from "./generationChime.js";
 import { myNewtHighlightColor } from "./myNewt/completion.js";
@@ -72,9 +76,9 @@ import {
   formatPricedRunLabel,
   generationProviderFromSettings
 } from "./generationPricing.js";
+import { RunPriceLabel } from "./components/RunPriceLabel.jsx";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { CanvasSnapToggle, EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
-import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
 import {
   Model3DViewer,
@@ -84,34 +88,13 @@ import {
   useNewtNodeImageFallback,
   useNewtNodeVideoFallback
 } from "./components/MediaViews.jsx";
-import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
+import { MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
-import { canDeleteCanvasSelection, focusCanvasSelection } from "./nodeKeyboardRouting.js";
-import { renderComposerViewport } from "./composerRender.js";
+import { canDeleteCanvasSelection, focusCanvasSelection, editorTimelineZoomDirection } from "./nodeKeyboardRouting.js";
 import { cleanReferenceTag, promptHasReferenceTag, resolveTaggedImageReferences, taggedReferenceLabel } from "./referenceTags.js";
-import {
-  composerAspectRatioNumber,
-  composerAspectRatioValue,
-  composerImageAspectFromSource,
-  composerPrimitiveLabel,
-  composerPrimitiveOptions,
-  composerPoseSnapshot,
-  composerRotationVector,
-  composerRotationVectorPatch,
-  composerSavedPosePatch,
-  defaultComposerImagePlane,
-  defaultComposerMaquette,
-  defaultComposerProp,
-  defaultComposerScene,
-  mergeComposerSavedPoses,
-  normalizeComposerAspectRatio,
-  normalizeComposerSavedPose,
-  normalizeComposerSavedPoses,
-  normalizedComposerScene,
-  resolveComposerImagePlaneSources
-} from "./composerState.js";
+import { defaultComposerScene, normalizedComposerScene } from "./composerState.js";
 import {
   defaultFrameItPoseId,
   defaultFrameItScene,
@@ -188,8 +171,9 @@ import {
   upsertCharacterWardrobeVariant
 } from "./characterSheetWorkflow.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
-import { isOpenAiImage25Model, openAiImage25Variant, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25QualityOptions, openAiImage25BackgroundOptions, openAiImage25KreaAspectRatios, openAiImage25KreaSelection } from "./openAiImage25.js";
-import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
+import { isOpenAiImage25Model, openAiImage25Variant, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25QualityOptions, openAiImage25BackgroundOptions, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions, openAiImage25KreaSelection } from "./openAiImage25.js";
+import { isCoverageNode, isUtilityCoverageModel, coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
+import { migrateRetiredNode } from "./retiredNodes.js";
 import {
   batchOptions,
   birefnetModelOptions,
@@ -214,8 +198,6 @@ import {
   storyboardImageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
-  krea2AspectRatios,
-  krea2CreativityOptions,
   klingO34kAspectRatioOptions,
   klingO34kDurationOptions,
   klingO34kResolutionOptions,
@@ -231,8 +213,6 @@ import {
   openAiImageAspectRatios,
   patinaMapOptions,
   qwenCameraDefaults,
-  reve21AspectRatios,
-  reve21ResolutionOptions,
   sam3SegmentationModelsEnabled,
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -270,7 +250,6 @@ import {
   minimaxH3ResolutionOptions
 } from "./minimaxH3.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
-import { isReve21Model } from "./reve21.js";
 import {
   analyzeColorLookPalette,
   buildColorGradePrompt,
@@ -362,7 +341,8 @@ import { buildProjectOutputItems } from "./projectOutputs.js";
 import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
 import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
 import { requireStoryboardPlanResponse, storyboardQcUnavailable } from "./storyboardPlanValidation.js";
-import { degreesToRadians, radiansToDegrees } from "./threeRuntime.js";
+import { assertStoryboardCharacterTags, resolveStoryboardFrameCast, storyboardPlannedCastPatch, storyboardCastPrompt } from "./storyboardCast.js";
+import { storyboardPromptPolicy } from "./storyboardPromptPolicy.js";
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { normalizeVideoGenerateAudio } from "./videoAudio.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
@@ -395,7 +375,6 @@ const nodeIcons = {
   preview: MonitorPlay,
   character: UserRound,
   camera: Camera,
-  composer: Box,
   frameIt: PersonStanding,
   style: Palette,
   transfer: Compass,
@@ -404,6 +383,7 @@ const nodeIcons = {
   model3d: Box,
   autoAspect: Maximize2,
   coverage: Aperture,
+  explore: Compass,
   imageModel: ImagePlus,
   videoModel: Film,
   audioModel: Volume2,
@@ -514,13 +494,6 @@ const nodeHelpContent = {
       "Connect the red output to an image model camera input."
     ]
   },
-  composer: {
-    title: "Composer",
-    lines: [
-      "Builds a staged 3D reference layout for blocking, camera, and object placement.",
-      "Capture a view and use it as an image reference or composition guide."
-    ]
-  },
   frameIt: {
     title: "Frame It",
     lines: [
@@ -546,7 +519,7 @@ const nodeHelpContent = {
   utility: {
     title: "Utility",
     lines: [
-      "Contains Auto Aspect plus helper tools for media cleanup, extraction, masks, and other workflow tasks.",
+      "Contains Coverage, Auto Aspect, Frame It, 3D, and tools for media cleanup, extraction, and masks.",
       "Connect supported media, choose the tool, then run or export the result."
     ]
   },
@@ -819,7 +792,7 @@ const storyboardDefaultMoodBoardUrl = "/storyboard/MOOD_BOARD.png";
 const storyboardMaxCharacters = 6;
 const storyboardCharacterSheetVersion = 2;
 const storyboardDefaultAspectRatio = "16:9";
-const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1", "3:2", "2:3"];
+const storyboardAspectRatioOptions = [...new Set(["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", ...openAiImage25KreaAspectRatios])];
 const storyboardDefaultResolution = "1K";
 const storyboardHighResolution = "4K";
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
@@ -866,9 +839,6 @@ const namedColorPalette = [
 const groupPalette = namedColorPalette.map((item) => item.color);
 const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette];
 const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b35", "#f0c83b"];
-const krea2UnsupportedInputPorts = new Set(["cameraIn", "transferIn", "characterIn"]);
-const krea2UnsupportedSourceTypes = new Set(["camera", "transfer", "character"]);
-const emptyPortSet = new Set();
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
@@ -919,6 +889,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ normalizeEditorGraph }), []);
   const viewportRef = React.useRef(savedDraft.viewport);
   const nodesRef = React.useRef(savedDraft.nodes);
+  const exploreRunsRef = React.useRef(new Set());
   const edgesRef = React.useRef(savedDraft.edges);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
   const [edges, setEdges] = React.useState(savedDraft.edges);
@@ -951,7 +922,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const selectedEdgeIdRef = React.useRef(null);
-  const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
   const [generationProvider, setGenerationProvider] = React.useState("fal");
   const [imageEditProvider, setImageEditProvider] = React.useState("");
   usePricingRevision();
@@ -1004,7 +974,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setNodes((current) => {
       let changed = false;
       const next = current.map((node) => {
-        if (!["imageModel", "coverage", "storyboard"].includes(node.type) || ["running", "planning", "exporting", "compiling-board", "compiling-characters"].includes(node.data.status) || !isOpenAiImage25Model(node.data.model)) return node;
+        if ((!["imageModel", "storyboard"].includes(node.type) && !isCoverageNode(node)) || ["running", "planning", "exporting", "compiling-board", "compiling-characters"].includes(node.data.status) || !isOpenAiImage25Model(node.data.model)) return node;
         const patch = openAiImage25KreaSelection(node.data);
         if (Object.entries(patch).every(([key, value]) => node.data[key] === value)) return node;
         changed = true;
@@ -1041,7 +1011,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     [nodes, selectedNodeSet, incomingByNode]
   );
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
-  const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
   const {
     workflowFileInputRef,
     projects,
@@ -1139,7 +1108,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !enabledImageModels.includes(node.data.model)) {
           return { ...node, data: { ...node.data, model: fallbackImageModel } };
         }
-        if (node.type === "coverage" && !enabledCoverageModels.includes(node.data.model)) {
+        if (isCoverageNode(node) && !enabledCoverageModels.includes(node.data.model)) {
           return {
             ...node,
             data: {
@@ -1284,6 +1253,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
 
+      const editorZoomDirection = editorTimelineZoomDirection(event);
+      if (editorZoomDirection && event.target === canvasRef.current && !dragState && selectedNodeIds.length === 1) {
+        const editor = nodes.find(node => node.id === selectedNodeIds[0] && node.type === "editor");
+        if (editor) {
+          event.preventDefault();
+          updateNode(editor.id, { editorZoom: editorZoomStep(editor.data.editorZoom, editorZoomDirection) });
+          return;
+        }
+      }
+
       if (event.key === "Backspace" || event.key === "Delete") {
         if (!canDeleteCanvasSelection(event, canvasRef.current)) return;
         if (selectedNodeIds.length) {
@@ -1373,7 +1352,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath]);
+  }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, dragState]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -1591,6 +1570,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function addNode(type, position, options = {}) {
+    if (!nodeCatalog.some((entry) => entry.type === type)) return;
     const existingNewt = type === "myNewt" && nodesRef.current.find((node) => node.type === "myNewt");
     if (existingNewt) { setSelectedNodeIds([existingNewt.id]); setContextMenu(null); return; }
     if (type === "myNewt" && !projectId) setProjectId(createNodeId("project"));
@@ -1634,6 +1614,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function createNodeData(type, label, count) {
     const data = createDefaultNodeData(type, label, count);
+    if (type === "explore") {
+      const model = enabledImageModels.includes(data.model) ? data.model : enabledImageModels.find(item => exploreModels.includes(item)) || data.model;
+      return { ...data, ...imageModelSelectionPatch(data, model, generationProvider) };
+    }
     if (type === "imageModel") {
       const model = enabledImageModels.includes(data.model)
         ? data.model
@@ -1919,7 +1903,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const coverageInputsRemoved = new Set(
       edgesRef.current
         .filter((edge) => ids.has(edge.id))
-        .filter((edge) => edge.to.port === "imageIn" && nodesRef.current.find((node) => node.id === edge.to.nodeId)?.type === "coverage")
+        .filter((edge) => edge.to.port === "imageIn" && isCoverageNode(nodesRef.current.find((node) => node.id === edge.to.nodeId)))
         .map((edge) => edge.to.nodeId)
     );
     setEdges((current) => current.filter((edge) => !ids.has(edge.id)));
@@ -2061,6 +2045,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function updateNode(nodeId, patch) {
+    const previous = nodesRef.current.find((node) => node.id === nodeId);
+    if (previous?.type === "utility" && !isCoverageNode(previous) && isCoverageNode({ ...previous, data: { ...previous.data, ...patch } })) {
+      patch = { ...utilityImageModelSelectionPatch(previous.data, utilityImageModelNames.coverage), ...patch };
+    }
     let nextUtilityData = null;
     let nextCameraData = null;
     let nextStyleData = null;
@@ -2259,54 +2247,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function captureComposerFrame(node, imageDataUrl) {
-    pushUndoSnapshot();
-    updateNode(node.id, {
-      status: "uploading",
-      error: ""
-    });
-
-    try {
-      const composerScene = normalizedComposerScene(node.data.composerScene);
-      const { response, data } = await nodeApi.composerFrame({
-        ...workflowRequestContext(),
-        imageDataUrl,
-        nodeId: node.id,
-        nodeTitle: node.data.title,
-        aspectRatio: node.data.composerAspectRatio || "16:9",
-        maquetteCount: composerScene.maquettes.length,
-        propCount: composerScene.props.length,
-        imagePlaneCount: composerScene.imagePlanes.length
-      });
-      if (!response.ok) throw new Error(data.error || "Composer capture failed.");
-
-      updateNode(node.id, {
-        fileName: data.image.fileName,
-        mimeType: data.image.mimeType,
-        mediaType: "image",
-        resultUrl: data.image.localUrl,
-        resultItems: [
-          {
-            url: data.image.localUrl,
-            type: "image",
-            label: "Composer frame",
-            cost: data.cost
-          }
-        ],
-        selectedResultIndex: 0,
-        status: "complete",
-        error: ""
-      });
-      setSaveStatus("Composer frame captured");
-      loadOutputHistory();
-    } catch (error) {
-      updateNode(node.id, {
-        status: "error",
-        error: error.message
-      });
-      throw error;
-    }
-  }
 
   async function captureFrameItFrame(node, imageDataUrl) {
     pushUndoSnapshot();
@@ -3691,12 +3631,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       updateNode(currentNode.id, { status: "planning", error: "" });
       assertCharacterOutputReferences(incoming.characterIn);
+      assertStoryboardCharacterTags(storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, currentIncomingByNode, { includeInternal: !directorControlsScene }));
       const { response, data } = await nodeApi.planStoryboard({
         nodeId: currentNode.id,
         nodeTitle: currentNode.data.title,
         ...workflowRequestContext(),
         sceneDescription,
         frameCount: requestedFrameCount,
+        useStoryboardStyle: currentNode.data.useStoryboardStyle !== false,
         notes: directorControlsScene ? "" : currentNode.data.storyboardNotes || "",
         characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, currentIncomingByNode, { includeInternal: !directorControlsScene }),
         locations: storyboardSceneReferenceSummaries(incoming.sceneReferenceIn || [], currentIncomingByNode),
@@ -3756,6 +3698,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const directorControlsInitialScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
     try {
       assertCharacterOutputReferences(incoming.characterIn);
+      assertStoryboardCharacterTags(storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, currentIncomingByNode, { includeInternal: !directorControlsInitialScene }));
       if (!directorControlsInitialScene) currentNode = await ensureStoryboardCharactersReady(currentNode);
     } catch (error) {
       updateNode(currentNode.id, { status: "error", error: error.message });
@@ -3784,11 +3727,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "" });
         const latestStoryboardNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
         const continuityReferenceItems = storyboardContinuityReferenceItems(latestStoryboardNode, frame);
-        const requiredCharacterSources = storyboardRequiredCharacterSourcesForFrame(latestStoryboardNode, frame, sceneDescription, incoming, currentIncomingByNode, { includeInternal: !directorControlsScene });
+        const frameCast = storyboardFrameCastForNode(latestStoryboardNode, frame, incoming, currentIncomingByNode, { includeInternal: !directorControlsScene });
         const allCharacterSources = storyboardCharacterSourcesForNode(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, { includeInternal: !directorControlsScene });
-        const activeCharacterSources = requiredCharacterSources.length
-          ? requiredCharacterSources
-          : allCharacterSources.length === 1 ? allCharacterSources : [];
+        const activeCharacterSources = frameCast.references.map((reference) => allCharacterSources.find((source) => characterTag(source).toLowerCase() === reference.tag.toLowerCase()));
         const allLocationSources = storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], currentIncomingByNode);
         const activeLocationSources = storyboardRequiredLocationSourcesForFrame(frame, sceneDescription, allLocationSources);
         const allPropSources = storyboardPropReferenceSources(incoming.propsIn || [], currentIncomingByNode);
@@ -3799,20 +3740,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           propSources: activePropSources
         });
         const imagePromptItems = storyboardImagePromptItemsForFrame(baseImagePromptItems, continuityReferenceItems);
-        const missingCharacterTags = storyboardMissingRequiredCharacterTags(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, [
-          frame.prompt,
-          frame.beat,
-          frame.notes,
-          sceneDescription
-        ].filter(Boolean).join("\n"), { includeInternal: !directorControlsScene });
-        if (missingCharacterTags.length) {
-          throw new Error(`Character sheet missing for ${missingCharacterTags.map((tag) => `@${tag}`).join(", ")}. Regenerate or re-upload that Storyboard character before running this frame.`);
-        }
         const basePrompt = buildStoryboardFramePrompt(latestStoryboardNode, frame, sceneDescription, incoming, currentIncomingByNode, {
           hasPreviousFrameReference: continuityReferenceItems.some((item) => item.label === storyboardPreviousFrameLabel),
           hasSpatialAnchorReference: continuityReferenceItems.some((item) => item.label === storyboardSpatialAnchorLabel),
-          requiredCharacterSources,
-          activeCharacterSources,
+          castReferences: frameCast.references,
           activeLocationSources,
           activePropSources
         });
@@ -3854,6 +3785,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             generated,
             sceneDescription,
             framePrompt: prompt,
+            characterReferences: frameCast.references.map(({ tag, url }) => ({ tag, url })),
             continuityReferenceItems
           });
 
@@ -3907,16 +3839,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return successes.length ? { status: "complete" } : { status: "error", error: failures[0] || new Error("Storyboard generation failed.") };
   }
 
-  async function reviewStoryboardGeneratedFrame({ node, frame, generated, sceneDescription, framePrompt, continuityReferenceItems = [] }) {
+  async function reviewStoryboardGeneratedFrame({ node, frame, generated, sceneDescription, framePrompt, characterReferences = [], continuityReferenceItems = [] }) {
     try {
       const previousFrame = continuityReferenceItems.find((item) => item.label === storyboardPreviousFrameLabel);
       const spatialAnchor = continuityReferenceItems.find((item) => item.label === storyboardSpatialAnchorLabel);
       const { response, data } = await nodeApi.reviewStoryboardFrame({
         sourceUrl: generated.url,
+        characterReferences,
         previousFrameUrl: previousFrame?.url || "",
         spatialAnchorUrl: spatialAnchor?.url || "",
         sceneDescription,
         framePrompt,
+        useStoryboardStyle: node.data.useStoryboardStyle !== false,
         frameNumber: frame.number,
         shot: frame.shot || "",
         angle: frame.angle || "",
@@ -4750,7 +4684,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isAutoAspectNode(targetNode) && port === "imageIn") {
       updateNode(nodeId, resetAutoAspectOutputPatch());
     }
-    if (targetNode?.type === "coverage" && port === "imageIn") {
+    if (isCoverageNode(targetNode) && port === "imageIn") {
       updateNode(nodeId, resetCoverageOutputPatch());
     }
     setSelectedEdgeId(null);
@@ -5049,11 +4983,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         pushUndoSnapshot();
         const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
         const shouldResetAutoAspectOutput = isAutoAspectNode(targetNodeForConnection) && to.port === "imageIn";
-        const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
+        const shouldResetCoverageOutput = isCoverageNode(targetNodeForConnection) && to.port === "imageIn";
         setEdges((current) => {
           const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
           const replacesSingleAutoAspectInput = isAutoAspectNode(targetNodeForConnection) && to.port === "imageIn";
-          const replacesSingleCoverageInput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
+          const replacesSingleCoverageInput = isCoverageNode(targetNodeForConnection) && to.port === "imageIn";
           const replacesSingleAudioInput = targetNodeForConnection?.type === "audioModel" && to.port === "audioIn";
           const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
           let nextEdges = current.filter((edge) => {
@@ -5117,6 +5051,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (target.type === "explore") return { prompt: ["promptIn"], image: ["imageIn"], character: ["characterIn"], transfer: ["transferIn"], style: ["styleIn"], camera: ["cameraIn"] }[outputKind] || [];
     if (target.type === "myNewt") return [{ video: "videoIn", audio: "audioIn", character: "characterIn", transfer: "transferIn" }[outputKind] || "imageIn"];
     const inputs = {
       prompt: {
@@ -5195,10 +5130,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function autoConnectionOutputKind(source, from) {
+    if (source.type === "explore") return from.port === "imageOut" ? "image" : "";
     if (source.type === "editor") return "video";
     if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
-    if (source.type === "coverage") return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "image" : "";
+    if (isCoverageNode(source)) return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "image" : "";
     if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "frameIt") return "image";
@@ -5232,11 +5168,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     ) {
       return "Unlock Scene Setup before changing Director references";
     }
-    if (isImageModelUnsupportedInput(target, to.port)) return imageModelUnsupportedInputMessage(target.data?.model);
-    if (isImageModelUnsupportedSource(target, source)) return imageModelUnsupportedInputMessage(target.data?.model);
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (target.type === "explore") {
+      if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Explore";
+      if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Explore";
+      if (source.type === "style" && !styleOutputEnabled(source.data)) return "Choose a Style or Grade before connecting";
+      if (source.type === "camera" && !hasCameraPreset(source)) return "Choose a Camera preset before connecting";
+      return "";
+    }
+    if (source.type === "explore" && target.type !== "audioModel") return "";
     if (source.type === "editor") {
       if (target.type === "preview") return "";
       if (!connectedOutputItem(source, { from, to })?.url) return "Export the current Editor sequence before connecting it to a video input";
@@ -5275,7 +5217,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return "Auto Aspect outputs connect to image inputs or previews";
     }
 
-    if (source.type === "coverage") {
+    if (isCoverageNode(source)) {
       if (!normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length) {
         return "Generate Coverage before connecting it";
       }
@@ -5416,12 +5358,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
-    if (target?.type === "coverage" && to.port === "imageIn") {
+    if (isCoverageNode(target) && to.port === "imageIn") {
       if (source.type === "composer") return from.port === "imageOut" ? "" : "Coverage accepts image outputs";
       if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "Coverage accepts image outputs";
       if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "" : "Generate this Storyboard output before connecting it";
       if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
-      if (source.type === "coverage") return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "" : "Generate Coverage before connecting it";
+      if (isCoverageNode(source)) return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "" : "Generate Coverage before connecting it";
       if (["image", "imageModel", "frameIt"].includes(source.type)) return "";
       return "Coverage accepts image outputs";
     }
@@ -5692,7 +5634,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function runNode(node) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     const currentNode =
-      storedNode && node?.type === "skillDirector"
+      storedNode && ["skillDirector", "explore"].includes(node?.type)
         ? {
             ...storedNode,
             data: {
@@ -5703,6 +5645,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         : storedNode || node;
     if (!isRunnableNode(currentNode)) return { status: "skipped" };
     if (currentNode.data.status === "running") return { status: "skipped" };
+    if (currentNode.type === "explore") {
+      if (exploreRunsRef.current.has(currentNode.id)) return { status: "skipped" };
+      exploreRunsRef.current.add(currentNode.id);
+    }
 
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
@@ -5741,11 +5687,37 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, {
         status: "running",
         error: "",
+        ...(currentNode.type === "explore" ? { exploreStopRequested: false } : {}),
         ...(currentNode.type === "skillDirector" ? {
           skillDirectorAction: currentNode.data.skillDirectorAction || "build",
           skillDirectorQueuedAction: ""
         } : {})
       });
+
+      if (currentNode.type === "explore") {
+        const resuming = currentNode.data.exploreAction === "retry";
+        const settingsToValidate = resuming
+          ? (currentNode.data.exploreQueue || []).filter(item => ["pending", "failed"].includes(item.status)).map(item => item.settings || {})
+          : [currentNode.data];
+        for (const settings of settingsToValidate) {
+          if (!enabledImageModels.includes(settings.model) || !exploreModels.includes(settings.model)) throw new Error(`Enable ${settings.model || "the saved Explore image model"} in Settings before ${resuming ? "resuming" : "running"}.`);
+          if (!imageModelResolutionOptions(settings.model, generationProvider).includes(settings.resolution)
+            || !imageModelAspectRatioOptions(settings.model, generationProvider).includes(settings.aspectRatio)) throw new Error("The Explore model and format are unsupported by the current provider. Restore the original provider to resume, or choose a supported format for a new run.");
+        }
+        const references = (resuming ? [] : ["imageIn", "characterIn", "transferIn"]).flatMap(port => {
+          const connections = incoming[port] || [];
+          const assets = connectedAssetItems(connections);
+          if (assets.length !== connections.length || assets.some(item => item.type !== "image")) throw new Error(`An Explore ${port === "transferIn" ? "Mood Board" : port === "characterIn" ? "Character" : "Image"} reference is not ready. Complete it before running.`);
+          return assets.map(item => ({ ...item, role: { imageIn: "product", characterIn: "character", transferIn: "mood" }[port] }));
+        });
+        const outcome = await runExploreGeneration({ node: currentNode, prompt: basePrompt, references,
+          style: (incoming.styleIn || []).flatMap(({ source }) => promptPiecesForSource(source)).join("\n"),
+          camera: (incoming.cameraIn || []).flatMap(({ source }) => promptPiecesForSource(source)).join("\n"),
+          workflowContext: requestContext, update: patch => updateNode(currentNode.id, patch),
+          shouldStop: () => { const live = nodesRef.current.find(item => item.id === currentNode.id); return !live || Boolean(live.data.exploreStopRequested); } });
+        loadOutputHistory();
+        return outcome;
+      }
 
       if (currentNode.type === "text") {
         const processed = await runTextNodeProcessing({
@@ -5966,7 +5938,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
-      if (currentNode.type === "coverage") {
+      if (isCoverageNode(currentNode)) {
         const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
         if (!sourceImageUrl) throw new Error("Connect an image to Coverage.");
         const method = normalizeCoverageMethod(currentNode.data.coverageMethod);
@@ -6261,6 +6233,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     } catch (error) {
       updateNode(currentNode.id, { status: "error", error: error.message });
       return { status: "error", error };
+    } finally {
+      exploreRunsRef.current.delete(currentNode.id);
     }
   }
 
@@ -6335,6 +6309,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     imageModel: { model: enabledImageModels, quality: ["low", "medium", "high"], batchCount: ["1", "2", "3", "4", "5", "6", "7", "8", "9"] },
     videoModel: { model: enabledVideoModels, batchCount: ["1", "2", "3", "4"] },
     coverage: { model: enabledCoverageModels, coverageMethod: ["Standard", "Dynamic", "Insane"] },
+    utility: { utilityMode: ["image"], utilityImageModel: [utilityImageModelNames.coverage], model: enabledCoverageModels, coverageMethod: coverageMethods },
     storyboard: { model: storyboardImageModelOptions },
     character: { characterSheetModel: characterSheetModelOptions },
     preview: { previewTab: ["preview", "layout"] },
@@ -6342,7 +6317,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }), [enabledImageModels, enabledVideoModels, enabledCoverageModels]);
   const myNewtModelControls = (type, model) => {
     if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: generationProvider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions };
-    if (["imageModel", "coverage"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
+    if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
     if (type !== "videoModel") return {};
     if (isMiniMaxH3Model(model)) return { duration: minimaxH3DurationOptions, resolution: minimaxH3ResolutionOptions, aspectRatio: minimaxH3AspectRatioOptions };
     if (isSeedance25Model(model)) return { duration: seedance25DurationOptions.filter((value) => value !== "Auto"), resolution: seedance25ResolutionOptions, aspectRatio: seedance25AspectRatioOptions };
@@ -6362,7 +6337,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return { type, label, ports: { input, output }, editableFields: ["title", ...(myNewtFields[type] || [])],
       defaults: Object.fromEntries((myNewtFields[type] || []).filter((key) => defaults[key] !== undefined).map((key) => [key, defaults[key]])),
       options: myNewtOptions[type] || {}, modelControls: Object.fromEntries((myNewtOptions[type]?.model || []).map((model) => [model, myNewtModelControls(type, model)])),
-      stages: myNewtRunStages[type] || [], manualOnly: ["composer", "utility", "transfer", "audioModel", "editor"].includes(type) };
+      stages: myNewtRunStages[type] || [], manualOnly: ["transfer", "audioModel", "editor", "explore"].includes(type),
+      ...(type === "utility" ? { description: "Only Image > Coverage supports agent generation. Set utilityMode to image and utilityImageModel to Coverage; generates nine camera angles. Other Utility tools require manual operation." } : {}) };
   }), [myNewtOptions, generationProvider]);
   const newtPresets = useNewtPresets({
     projectId, onStatus: setSaveStatus,
@@ -6428,12 +6404,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   });
   const newtCreationData = (type, data, explicitPatch = {}, context = {}) => {
+    if (isCoverageNode({ type, data: { ...data, ...explicitPatch } }) && type === "utility") data = { ...data, ...utilityImageModelSelectionPatch(data, utilityImageModelNames.coverage) };
     const settings = nodesRef.current.find((node) => node.type === "myNewt")?.data;
-    const patch = { ...myNewtFavoriteCreationPatch(type, settings, myNewtCatalog, explicitPatch, context), ...explicitPatch };
+    const patch = { ...myNewtFavoriteCreationPatch(isCoverageNode({ type, data }) ? "coverage" : type, settings, myNewtCatalog, explicitPatch, context), ...explicitPatch };
     validateMyNewtOptions(type, patch, data);
     const selection = patch.model && type === "imageModel" ? imageModelSelectionPatch(data, patch.model, generationProvider)
       : patch.model && type === "videoModel" ? videoModelSelectionPatch(data, patch.model)
-        : patch.model && type === "coverage" ? { resolution: normalizeImageModelResolutionForModel(data.resolution, patch.model), aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, patch.model) } : {};
+        : patch.model && (type === "coverage" || isCoverageNode({ type, data: { ...data, ...patch } })) ? { resolution: normalizeImageModelResolutionForModel(data.resolution, patch.model), aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, patch.model) } : {};
     return { ...data, ...selection, ...patch };
   };
   const myNewtTaskController = useMyNewt({
@@ -6497,11 +6474,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const byNode = buildIncomingByNode(nodesRef.current, edgesRef.current), incoming = byNode[node.id] || {};
       const data = node.data, count = Math.max(1, Number(data.batchCount) || 1);
       const base = { title: data.title || node.type, stage, provider: generationProvider, count, references: [] };
-      if (node.type === "imageModel" || node.type === "coverage") {
+      if (node.type === "imageModel" || isCoverageNode(node)) {
         const prompt = connectedText(incoming.promptIn) || data.prompt || "";
-        const references = connectedImagePromptItems(node.type === "coverage" ? incoming.imageIn || [] : imageReferenceConnectionsForModel(data.model, incoming), byNode, { includeComposerCharacterBindings: true, prompt });
-        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), batchCount: node.type === "coverage" ? 9 : count, referenceCount: references.length, provider: generationProvider };
-        return { ...base, ...settings, count: settings.batchCount, references, prompt: node.type === "coverage" ? `Nine ${data.coverageMethod || "Standard"} camera-angle generations` : buildEffectiveImagePrompt(prompt, imageInstructionSourcesForModel(data.model, incoming), data.aspectRatio, byNode), estimatedCost: estimateImageRunCost(settings) };
+        const references = connectedImagePromptItems(isCoverageNode(node) ? incoming.imageIn || [] : imageReferenceConnectionsForModel(data.model, incoming), byNode, { includeComposerCharacterBindings: true, prompt });
+        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), batchCount: isCoverageNode(node) ? 9 : count, referenceCount: references.length, provider: generationProvider };
+        return { ...base, ...settings, count: settings.batchCount, references, prompt: isCoverageNode(node) ? `Nine ${data.coverageMethod || "Standard"} camera-angle generations` : buildEffectiveImagePrompt(prompt, imageInstructionSourcesForModel(data.model, incoming), data.aspectRatio, byNode), estimatedCost: estimateImageRunCost(settings) };
       }
       if (node.type === "videoModel") {
         const director = connectedDirectorPackageSource(incoming.directorIn);
@@ -6509,7 +6486,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const model = pack ? normalizeFilmDirectorVideoModel(pack.videoModel, data.model) : data.model;
         const display = expandVideoDirectorPackageIncoming(incoming, byNode, { includeCharacters: videoModelSupportsCharacterInput(model) });
         const references = uniqueAssetItems([...connectedAssetItems(display.referenceImageIn), ...connectedCharacterReferences(display.characterIn).map((item) => ({ ...item, type: "image" })), ...connectedAssetItems(display.referenceVideoIn), ...connectedAssetItems(display.referenceAudioIn), ...connectedAssetItems(display.startFrameIn), ...connectedAssetItems(display.endFrameIn)]);
-        const settings = { model, duration: pack ? filmDirectorVideoDuration(model, pack.durationSeconds, data.duration) : data.duration, resolution: pack ? filmDirectorVideoResolution(model, pack.resolution, data.resolution) : data.resolution, aspectRatio: pack ? filmDirectorVideoAspectRatio(model, pack.aspectRatio, data.aspectRatio) : data.aspectRatio, generateAudio: pack ? filmDirectorVideoGenerateAudio(pack.audioMode, normalizeVideoGenerateAudio(data.generateAudio)) : normalizeVideoGenerateAudio(data.generateAudio), batchCount: count, hasVideoReference: !!display.referenceVideoIn?.length, referenceImageCount: references.filter((item) => item.type === "image").length, provider: generationProvider };
+        const settings = { model, duration: pack ? filmDirectorVideoDuration(model, pack.durationSeconds, data.duration) : data.duration, resolution: pack ? filmDirectorVideoResolution(model, pack.resolution, data.resolution) : data.resolution, aspectRatio: pack ? filmDirectorVideoAspectRatio(model, pack.aspectRatio, data.aspectRatio) : data.aspectRatio, generateAudio: pack ? filmDirectorVideoGenerateAudio(pack.audioMode, normalizeVideoGenerateAudio(data.generateAudio)) : normalizeVideoGenerateAudio(data.generateAudio), batchCount: count, hasVideoReference: connectedAssetItems(display.referenceVideoIn).length > 0,
+          referenceImageCount: uniqueAssetItems([...connectedAssetItems(display.referenceImageIn), ...connectedCharacterReferences(display.characterIn).map(item => ({ url: item.url, label: item.label, type: "image" }))]).length,
+          startFrameCount: connectedAssetItems(display.startFrameIn).length, endFrameCount: connectedAssetItems(display.endFrameIn).length,
+          audioReferenceCount: connectedAssetItems(display.referenceAudioIn).length, provider: generationProvider };
         if (/auto/i.test(String(settings.duration))) throw new Error("Choose an explicit video duration before running Newt.");
         const prompt = [connectedDirectorPackageText(incoming.directorIn, byNode), connectedText(incoming.promptIn) || data.prompt].filter(Boolean).join("\n\n");
         return { ...base, ...settings, references, prompt: buildEffectiveVideoPrompt(prompt, display, byNode), audio: settings.generateAudio ? "Audio on" : "Audio off", estimatedCost: estimateVideoRunCost(settings) };
@@ -6580,20 +6560,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   });
 
-  const myNewtController = { ...myNewtTaskController, presets: newtPresets, modelOptions: { image: enabledImageModels, video: enabledVideoModels } };
+  const myNewtController = { ...myNewtTaskController, modelOptions: { image: enabledImageModels, video: enabledVideoModels } };
 
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`} style={{ "--output-drawer-width": `${outputDrawerWidth}px` }}>
       {newtPresets.draft && <NewtPresetDialog controller={newtPresets} />}
-      {composerEditorNode && (
-        <ComposerEditorModal
-          node={composerEditorNode}
-          incoming={incomingByNode[composerEditorNode.id] || {}}
-          onClose={() => setComposerEditorNodeId(null)}
-          onUpdate={(patch) => updateNode(composerEditorNode.id, patch)}
-          onCapture={(imageDataUrl) => captureComposerFrame(composerEditorNode, imageDataUrl)}
-        />
-      )}
       {unsavedPrompt && (
         <UnsavedWorkflowPrompt
           actionLabel={unsavedPrompt.actionLabel}
@@ -6696,6 +6667,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               </div>
             )}
           </div>
+          <PresetWorkflowPicker controller={newtPresets} insertionDisabled={myNewtTaskController.busy || myNewtTaskController.job?.status === "running" || nodes.some(node => node.type === "myNewt" && node.data.myNewtSummary?.status === "running")} />
         </div>
         {visibleNodeCatalog.map((item) => {
           const Icon = item.icon;
@@ -6814,7 +6786,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onPlainTextResizeStart={startPlainTextResize}
               onPreviewOpen={setPreviewLightboxItem}
               onPreviewLayoutExport={exportPreviewLayoutBoard}
-              onOpenComposer={setComposerEditorNodeId}
               onFrameItCapture={captureFrameItFrame}
               onFrameItGenerate={generateFrameItMedia}
               onCanvasPanStart={beginCanvasPan}
@@ -7101,7 +7072,6 @@ function NodeCard({
   onPlainTextResizeStart,
   onPreviewOpen,
   onPreviewLayoutExport,
-  onOpenComposer,
   onFrameItCapture,
   onFrameItGenerate,
   onCanvasPanStart,
@@ -7317,7 +7287,6 @@ function NodeCard({
         onPreviewResizeStart={onPreviewResizeStart}
         onPreviewOpen={onPreviewOpen}
         onPreviewLayoutExport={onPreviewLayoutExport}
-        onOpenComposer={onOpenComposer}
         onFrameItCapture={onFrameItCapture}
         onFrameItGenerate={onFrameItGenerate}
         onCanvasPanStart={onCanvasPanStart}
@@ -7472,707 +7441,15 @@ function StillFrameScrubber({ videoUrl, value, onChange }) {
   );
 }
 
-function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture }) {
-  const viewportRef = React.useRef(null);
-  const [captureStatus, setCaptureStatus] = React.useState("");
-  const [libraryPoses, setLibraryPoses] = React.useState([]);
-  const [poseStatus, setPoseStatus] = React.useState("");
-  const sceneData = normalizedComposerScene(node.data.composerScene);
-  const nodeSavedPoses = normalizeComposerSavedPoses(node.data.composerSavedPoses);
-  const savedPoseOptions = mergeComposerSavedPoses(libraryPoses, nodeSavedPoses);
-  const imageSources = connectedAssetItems(incoming.imageIn).filter((item) => item.type === "image" || /\.(png|jpe?g|webp|gif)$/i.test(item.url));
-  const renderSceneData = resolveComposerImagePlaneSources(sceneData, imageSources);
-  const composerObjects = [...sceneData.maquettes, ...sceneData.props, ...sceneData.imagePlanes];
-  const rawSelectedId = node.data.composerSelectedId || "";
-  const selectedId = rawSelectedId === "camera" ? "camera" : composerObjects.some((item) => item.id === rawSelectedId) ? rawSelectedId : sceneData.maquettes[0]?.id || sceneData.props[0]?.id || sceneData.imagePlanes[0]?.id || "camera";
-  const selectedMaquette = sceneData.maquettes.find((item) => item.id === selectedId);
-  const selectedProp = sceneData.props.find((item) => item.id === selectedId);
-  const selectedImagePlane = sceneData.imagePlanes.find((item) => item.id === selectedId);
-  const selectedObject = selectedMaquette || selectedProp || selectedImagePlane;
-  const selectedKind = selectedId === "camera" ? "camera" : selectedMaquette ? "maquette" : selectedProp ? "prop" : selectedImagePlane ? "imagePlane" : "";
-  const rawSelectedCameraBookmark = node.data.composerSelectedCameraBookmark || "";
-  const activeCameraBookmark = sceneData.cameraBookmarks.find((item) => item.id === rawSelectedCameraBookmark) || sceneData.cameraBookmarks[0] || null;
-  const selectedPoseValue =
-    selectedKind === "maquette" && savedPoseOptions.some((pose) => pose.id === selectedObject?.pose) ? selectedObject.pose : "";
-  const selectedNameValue = selectedKind === "camera" ? "Camera" : selectedObject?.name || "";
-  const sceneObjectList = [
-    { id: "camera", label: "Camera", type: "View" },
-    ...sceneData.maquettes.map((item, index) => ({ id: item.id, label: item.name || `Maquette ${index + 1}`, type: "Maquette" })),
-    ...sceneData.props.map((item, index) => ({ id: item.id, label: item.name || `${composerPrimitiveLabel(item.primitive)} ${index + 1}`, type: composerPrimitiveLabel(item.primitive) })),
-    ...sceneData.imagePlanes.map((item, index) => ({ id: item.id, label: item.name || `Image Plane ${index + 1}`, type: "Image Plane" }))
-  ];
 
-  React.useEffect(() => {
-    let cancelled = false;
 
-    composerApi.listPoses()
-      .then(({ response, data }) => {
-        if (!cancelled && response.ok) setLibraryPoses(normalizeComposerSavedPoses(data.poses));
-      })
-      .catch(() => {
-        if (!cancelled) setLibraryPoses([]);
-      });
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
-  function commitScene(nextScene, extraPatch = {}) {
-    onUpdate({
-      composerScene: normalizedComposerScene(nextScene),
-      ...extraPatch
-    });
-  }
 
-  function patchScene(patch) {
-    commitScene({ ...sceneData, ...patch });
-  }
 
-  function patchCamera(patch) {
-    patchScene({
-      camera: {
-        ...sceneData.camera,
-        ...patch
-      }
-    });
-  }
 
-  function patchSelected(patch) {
-    if (!selectedObject) return;
-    const key = selectedKind === "maquette" ? "maquettes" : selectedKind === "prop" ? "props" : "imagePlanes";
-    patchScene({
-      [key]: sceneData[key].map((item) => (item.id === selectedObject.id ? { ...item, ...patch } : item))
-    });
-  }
 
-  function addMaquette() {
-    const maquette = defaultComposerMaquette(sceneData.maquettes.length + 1);
-    commitScene({ ...sceneData, maquettes: [...sceneData.maquettes, maquette] }, { composerSelectedId: maquette.id });
-  }
 
-  function addPrimitiveProp(primitive) {
-    const prop = defaultComposerProp(sceneData.props.length + 1, primitive);
-    commitScene({ ...sceneData, props: [...sceneData.props, prop] }, { composerSelectedId: prop.id });
-  }
-
-  async function addImagePlane() {
-    const source = imageSources[0];
-    const aspectRatio = await composerImageAspectFromSource(source);
-    const imagePlane = defaultComposerImagePlane(sceneData.imagePlanes.length + 1, source?.url || "", source?.label || "", aspectRatio);
-    commitScene({ ...sceneData, imagePlanes: [...sceneData.imagePlanes, imagePlane] }, { composerSelectedId: imagePlane.id });
-  }
-
-  function saveCameraBookmark() {
-    const highestNamedCamera = sceneData.cameraBookmarks.reduce((highest, bookmark) => {
-      const match = /^cam\s+(\d+)$/i.exec(bookmark.name || "");
-      return match ? Math.max(highest, Number(match[1])) : highest;
-    }, sceneData.cameraBookmarks.length);
-    const bookmark = {
-      id: `camera-bookmark-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name: `Cam ${highestNamedCamera + 1}`,
-      camera: { ...sceneData.camera }
-    };
-    commitScene({ ...sceneData, cameraBookmarks: [...sceneData.cameraBookmarks, bookmark] }, { composerSelectedCameraBookmark: bookmark.id });
-  }
-
-  function recallCameraBookmark(bookmarkId) {
-    const bookmark = sceneData.cameraBookmarks.find((item) => item.id === bookmarkId);
-    if (!bookmark) return;
-    commitScene({ ...sceneData, camera: { ...sceneData.camera, ...bookmark.camera } }, { composerSelectedCameraBookmark: bookmark.id });
-  }
-
-  function stepCameraBookmark(direction) {
-    if (!sceneData.cameraBookmarks.length) return;
-    const currentIndex = Math.max(0, sceneData.cameraBookmarks.findIndex((item) => item.id === activeCameraBookmark?.id));
-    const nextIndex = (currentIndex + direction + sceneData.cameraBookmarks.length) % sceneData.cameraBookmarks.length;
-    recallCameraBookmark(sceneData.cameraBookmarks[nextIndex].id);
-  }
-
-  function deleteCameraBookmark() {
-    if (!activeCameraBookmark) return;
-    const currentIndex = sceneData.cameraBookmarks.findIndex((item) => item.id === activeCameraBookmark.id);
-    const nextBookmarks = sceneData.cameraBookmarks.filter((item) => item.id !== activeCameraBookmark.id);
-    const nextBookmark = nextBookmarks[Math.min(Math.max(currentIndex, 0), nextBookmarks.length - 1)] || null;
-    const nextScene = {
-      ...sceneData,
-      cameraBookmarks: nextBookmarks,
-      camera: nextBookmark ? { ...sceneData.camera, ...nextBookmark.camera } : sceneData.camera
-    };
-    commitScene(nextScene, { composerSelectedCameraBookmark: nextBookmark?.id || "" });
-  }
-
-  function applySavedPose(poseId) {
-    const savedPose = savedPoseOptions.find((pose) => pose.id === poseId);
-    if (!savedPose || !selectedObject) return;
-
-    const posePatch = composerSavedPosePatch(savedPose);
-    const nextScene = {
-      ...sceneData,
-      maquettes: sceneData.maquettes.map((item) => (item.id === selectedObject.id ? { ...item, ...posePatch } : item))
-    };
-
-    onUpdate({
-      composerScene: normalizedComposerScene(nextScene),
-      composerSavedPoses: mergeComposerSavedPoses(nodeSavedPoses, [savedPose])
-    });
-  }
-
-  async function saveSelectedPose() {
-    if (selectedKind !== "maquette" || !selectedObject) return;
-
-    const requestedName = window.prompt("Pose name", selectedObject.name ? `${selectedObject.name} pose` : "New pose");
-    const name = String(requestedName || "").trim();
-    if (!name) return;
-
-    const pose = normalizeComposerSavedPose({
-      id: `pose-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name,
-      ...composerPoseSnapshot(selectedObject)
-    });
-    if (!pose) return;
-
-    const nextSavedPoses = mergeComposerSavedPoses(nodeSavedPoses, [pose]);
-    const nextScene = {
-      ...sceneData,
-      maquettes: sceneData.maquettes.map((item) => (item.id === selectedObject.id ? { ...item, pose: pose.id } : item))
-    };
-
-    onUpdate({
-      composerScene: normalizedComposerScene(nextScene),
-      composerSavedPoses: nextSavedPoses
-    });
-    setPoseStatus(`Saved "${pose.name}" to this Composer.`);
-
-    try {
-      const { response, data } = await composerApi.savePose(pose);
-      if (!response.ok) throw new Error(data.error || "Could not save the pose library file.");
-
-      const savedPose = normalizeComposerSavedPose(data.pose || pose);
-      const library = normalizeComposerSavedPoses(data.poses);
-      const nextLibraryPoses = library.length ? library : mergeComposerSavedPoses(libraryPoses, [savedPose]);
-
-      setLibraryPoses(nextLibraryPoses);
-      onUpdate({
-        composerSavedPoses: mergeComposerSavedPoses(nextSavedPoses, [savedPose])
-      });
-      setPoseStatus(`Saved "${savedPose.name}" to this Composer and public/models/poses.`);
-    } catch (error) {
-      setPoseStatus(`Saved "${pose.name}" to this Composer. Library save failed until the backend is restarted.`);
-      console.warn(error);
-    }
-  }
-
-  async function deleteSelectedPose() {
-    if (selectedKind !== "maquette" || !selectedObject || !selectedPoseValue) return;
-
-    const savedPose = savedPoseOptions.find((pose) => pose.id === selectedPoseValue);
-    if (!savedPose) return;
-
-    const confirmed = window.confirm(`Delete pose "${savedPose.name}"?`);
-    if (!confirmed) return;
-
-    const nextSavedPoses = nodeSavedPoses.filter((pose) => pose.id !== savedPose.id);
-    const nextScene = {
-      ...sceneData,
-      maquettes: sceneData.maquettes.map((item) => (item.pose === savedPose.id ? { ...item, pose: "" } : item))
-    };
-
-    onUpdate({
-      composerScene: normalizedComposerScene(nextScene),
-      composerSavedPoses: nextSavedPoses
-    });
-    setLibraryPoses((poses) => poses.filter((pose) => pose.id !== savedPose.id));
-    setPoseStatus(`Deleted "${savedPose.name}" from this Composer.`);
-
-    if (!savedPose.fileName) return;
-
-    try {
-      const { response, data } = await composerApi.deletePose(savedPose.id);
-      if (!response.ok) throw new Error(data.error || "Could not delete the pose library file.");
-
-      setLibraryPoses(normalizeComposerSavedPoses(data.poses));
-      setPoseStatus(`Deleted "${savedPose.name}" from this Composer and public/models/poses.`);
-    } catch (error) {
-      setPoseStatus(`Deleted "${savedPose.name}" from this Composer. Library delete failed until the backend is restarted.`);
-      console.warn(error);
-    }
-  }
-
-  function removeSelected() {
-    if (!selectedObject) return;
-    const nextMaquettes = sceneData.maquettes.filter((item) => item.id !== selectedObject.id);
-    const nextProps = sceneData.props.filter((item) => item.id !== selectedObject.id);
-    const nextImagePlanes = sceneData.imagePlanes.filter((item) => item.id !== selectedObject.id);
-    commitScene(
-      {
-        ...sceneData,
-        maquettes: nextMaquettes,
-        props: nextProps,
-        imagePlanes: nextImagePlanes
-      },
-      { composerSelectedId: nextMaquettes[0]?.id || nextProps[0]?.id || nextImagePlanes[0]?.id || "camera" }
-    );
-  }
-
-  async function captureFrame() {
-    if (!viewportRef.current?.capture) {
-      setCaptureStatus("Viewport not ready.");
-      return;
-    }
-
-    try {
-      const imageDataUrl = await viewportRef.current.capture();
-      if (!imageDataUrl) {
-        setCaptureStatus("Viewport not ready.");
-        return;
-      }
-      setCaptureStatus("Capturing...");
-      await onCapture(imageDataUrl);
-      setCaptureStatus("Captured.");
-    } catch (error) {
-      setCaptureStatus(error.message || "Capture failed.");
-    }
-  }
-
-  return (
-    <div className="composer-modal" role="dialog" aria-modal="true" aria-label="Composer">
-      <div className="composer-shell" onPointerDown={(event) => event.stopPropagation()}>
-        <header className="composer-header">
-          <div>
-            <span>Composer</span>
-            <strong>{node.data.title || "Composer"}</strong>
-          </div>
-          <div className="composer-header-actions">
-            <select value={node.data.composerAspectRatio || "16:9"} onChange={(event) => onUpdate({ composerAspectRatio: event.target.value })} title="Frame aspect ratio">
-              <option>16:9</option>
-              <option>21:9</option>
-              <option>4:3</option>
-              <option>1:1</option>
-              <option>9:16</option>
-            </select>
-            <button className={`composer-toggle ${node.data.composerShowGuides !== false ? "enabled" : ""}`} onClick={() => onUpdate({ composerShowGuides: node.data.composerShowGuides === false })}>
-              Guides
-            </button>
-            <button onClick={captureFrame}>Capture Frame</button>
-            <button className="composer-danger" onClick={removeSelected} disabled={!selectedObject} title={selectedObject ? "Delete selected scene object" : "Select a scene object to delete"}>
-              Delete Selected
-            </button>
-            <button className="icon-only" onClick={onClose} title="Close Composer">
-              <X size={17} />
-            </button>
-          </div>
-        </header>
-
-        <main className="composer-main">
-          <ComposerViewport
-            ref={viewportRef}
-            sceneData={renderSceneData}
-            selectedId={selectedId}
-            aspectRatio={node.data.composerAspectRatio || "16:9"}
-            showGuides={node.data.composerShowGuides !== false}
-            onCameraChange={patchCamera}
-            renderViewport={renderComposerViewport}
-            aspectRatioValue={composerAspectRatioValue}
-            aspectRatioNumber={composerAspectRatioNumber}
-          />
-
-          <aside className={`composer-controls ${selectedKind === "maquette" ? "maquette-selected" : ""}`}>
-            <div className="composer-control-row trio">
-              <button onClick={addMaquette}>Add Maquette</button>
-              <select value="" onChange={(event) => event.target.value && addPrimitiveProp(event.target.value)} title="Add primitive">
-                <option value="">Add Primitive</option>
-                {composerPrimitiveOptions.map((primitive) => (
-                  <option key={primitive.id} value={primitive.id}>
-                    {primitive.label}
-                  </option>
-                ))}
-              </select>
-              <button onClick={addImagePlane} disabled={!imageSources.length} title={imageSources.length ? "Add connected image plane" : "Connect an image to Composer"}>
-                Add Plane
-              </button>
-            </div>
-
-            <div className="composer-selection-panel">
-              <div className="composer-object-list" role="listbox" aria-label="Scene objects">
-                {sceneObjectList.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={item.id === selectedId ? "selected" : ""}
-                    onClick={() => onUpdate({ composerSelectedId: item.id })}
-                    role="option"
-                    aria-selected={item.id === selectedId}
-                  >
-                    <span>{item.label}</span>
-                    <small>{item.type}</small>
-                  </button>
-                ))}
-              </div>
-              <label className="composer-field highlighted">
-                <span>Name</span>
-                <input value={selectedNameValue} disabled={selectedKind === "camera"} onChange={(event) => patchSelected({ name: event.target.value })} />
-              </label>
-            </div>
-
-            {selectedKind === "camera" ? (
-              <div className="composer-camera-panel">
-                <div className="composer-camera-bookmarks">
-                  <button type="button" onClick={() => stepCameraBookmark(-1)} disabled={!sceneData.cameraBookmarks.length} title="Previous camera bookmark" aria-label="Previous camera bookmark">
-                    <ChevronLeft size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    className="composer-camera-bookmark-current"
-                    onClick={() => activeCameraBookmark && recallCameraBookmark(activeCameraBookmark.id)}
-                    disabled={!activeCameraBookmark}
-                    title={activeCameraBookmark ? "Recall camera bookmark" : "No camera bookmarks"}
-                  >
-                    {activeCameraBookmark?.name || "Cam 0"}
-                  </button>
-                  <button type="button" onClick={() => stepCameraBookmark(1)} disabled={!sceneData.cameraBookmarks.length} title="Next camera bookmark" aria-label="Next camera bookmark">
-                    <ChevronRight size={15} />
-                  </button>
-                  <button type="button" onClick={saveCameraBookmark} title="Save current camera" aria-label="Save current camera">
-                    <Save size={15} />
-                  </button>
-                  <button type="button" onClick={deleteCameraBookmark} disabled={!activeCameraBookmark} title="Delete camera bookmark" aria-label="Delete camera bookmark">
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-                <ComposerVectorRange label="Location" value={{ x: sceneData.camera.x, y: sceneData.camera.y, z: sceneData.camera.z }} step="0.05" onChange={(value) => patchCamera({ x: value.x, y: value.y, z: value.z })} />
-                <ComposerRange label="Yaw" min="-360" max="360" step="1" value={sceneData.camera.yaw} onChange={(value) => patchCamera({ yaw: value })} />
-                <ComposerRange label="Pitch" min="-82" max="82" step="1" value={sceneData.camera.pitch} onChange={(value) => patchCamera({ pitch: value })} />
-                <ComposerRange label="Lens" step="1" value={sceneData.camera.fov} onChange={(value) => patchCamera({ fov: value })} />
-              </div>
-            ) : selectedObject ? (
-              selectedKind === "maquette" ? (
-                <>
-                  <label className="composer-field">
-                    <span>Color</span>
-                    <input type="color" value={selectedObject.color || "#b8b8b2"} onChange={(event) => patchSelected({ color: event.target.value })} />
-                  </label>
-                  <ComposerVectorRange label="Location" value={{ x: selectedObject.x, y: selectedObject.y, z: selectedObject.z }} step="0.05" onChange={(value) => patchSelected({ x: value.x, y: value.y, z: value.z })} />
-                  <ComposerRotationVectorRange label="Rotation" value={{ x: degreesToRadians(finiteNumber(selectedObject.rotX, 0)), y: degreesToRadians(finiteNumber(selectedObject.rotY, 0)), z: degreesToRadians(finiteNumber(selectedObject.rotZ, 0)) }} onChange={(value) => patchSelected({ rotX: radiansToDegrees(value.x), rotY: radiansToDegrees(value.y), rotZ: radiansToDegrees(value.z) })} />
-                  <ComposerRange label="Scale" step="0.05" value={selectedObject.scale} onChange={(value) => patchSelected({ scale: value })} />
-                  <details className="composer-pose-panel">
-                    <summary>
-                      <span>Pose Controls</span>
-                      <ChevronDown size={14} />
-                    </summary>
-                    <div className="composer-pose-panel-body">
-                      <div className="composer-control-row pose-save">
-                        <label className="composer-field highlighted">
-                          <span>Pose Presets</span>
-                          <select value={selectedPoseValue} onChange={(event) => applySavedPose(event.target.value)}>
-                            <option value="" disabled>
-                              {savedPoseOptions.length ? "Select pose" : "No saved poses"}
-                            </option>
-                            {savedPoseOptions.map((pose) => (
-                              <option key={pose.id} value={pose.id}>
-                                {pose.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <button type="button" className="composer-pose-delete" onClick={deleteSelectedPose} disabled={!selectedPoseValue} title={selectedPoseValue ? "Delete selected pose" : "Select a pose to delete"} aria-label="Delete selected pose">
-                          <Trash2 size={15} />
-                        </button>
-                        <button type="button" onClick={saveSelectedPose}>
-                          Save
-                        </button>
-                      </div>
-                      {poseStatus && <div className="composer-status">{poseStatus}</div>}
-                      <ComposerRotationVectorRange label="Head" value={composerRotationVector(selectedObject, "headRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("headRot", value, false))} />
-                      <ComposerRotationVectorRange label="Upper Body" value={composerRotationVector(selectedObject, "upperBodyRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("upperBodyRot", value, false))} />
-                      <ComposerRotationVectorRange label="L Upper Arm" value={composerRotationVector(selectedObject, "leftUpperArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftUpperArm", value))} />
-                      <ComposerRotationVectorRange label="L Lower Arm" value={composerRotationVector(selectedObject, "leftLowerArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftLowerArm", value))} />
-                      <ComposerRotationVectorRange label="L Hand" value={composerRotationVector(selectedObject, "leftHandRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftHandRot", value, false))} />
-                      <ComposerRotationVectorRange label="R Upper Arm" value={composerRotationVector(selectedObject, "rightUpperArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightUpperArm", value))} />
-                      <ComposerRotationVectorRange label="R Lower Arm" value={composerRotationVector(selectedObject, "rightLowerArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightLowerArm", value))} />
-                      <ComposerRotationVectorRange label="R Hand" value={composerRotationVector(selectedObject, "rightHandRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightHandRot", value, false))} />
-                      <ComposerRotationVectorRange label="Hips" value={composerRotationVector(selectedObject, "hipsRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("hipsRot", value, false))} />
-                      <ComposerRotationVectorRange label="L Upper Leg" value={composerRotationVector(selectedObject, "leftUpperLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftUpperLeg", value))} />
-                      <ComposerRotationVectorRange label="L Lower Leg" value={composerRotationVector(selectedObject, "leftLowerLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftLowerLeg", value))} />
-                      <ComposerRotationVectorRange label="L Foot" value={composerRotationVector(selectedObject, "leftFootRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftFootRot", value, false))} />
-                      <ComposerRotationVectorRange label="R Upper Leg" value={composerRotationVector(selectedObject, "rightUpperLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightUpperLeg", value))} />
-                      <ComposerRotationVectorRange label="R Lower Leg" value={composerRotationVector(selectedObject, "rightLowerLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightLowerLeg", value))} />
-                      <ComposerRotationVectorRange label="R Foot" value={composerRotationVector(selectedObject, "rightFootRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightFootRot", value, false))} />
-                    </div>
-                  </details>
-                </>
-              ) : (
-                <>
-                  <ComposerVectorRange label="Location" value={{ x: selectedObject.x, y: selectedObject.y, z: selectedObject.z }} step="0.05" onChange={(value) => patchSelected({ x: value.x, y: value.y, z: value.z })} />
-                  <ComposerRotationVectorRange label="Rotation" value={{ x: degreesToRadians(finiteNumber(selectedObject.rotX, 0)), y: degreesToRadians(finiteNumber(selectedObject.rotY, 0)), z: degreesToRadians(finiteNumber(selectedObject.rotZ, 0)) }} onChange={(value) => patchSelected({ rotX: radiansToDegrees(value.x), rotY: radiansToDegrees(value.y), rotZ: radiansToDegrees(value.z) })} />
-                  <ComposerRange label="Scale" step="0.05" value={selectedObject.scale} onChange={(value) => patchSelected({ scale: value })} />
-
-                  {selectedKind === "prop" ? (
-                    <>
-                      <label className="composer-field">
-                        <span>Color</span>
-                        <input type="color" value={selectedObject.color || "#496b8f"} onChange={(event) => patchSelected({ color: event.target.value })} />
-                      </label>
-                      <label className="composer-field">
-                        <span>Primitive</span>
-                        <select value={selectedObject.primitive || "box"} onChange={(event) => patchSelected({ primitive: event.target.value })}>
-                          {composerPrimitiveOptions.map((primitive) => (
-                            <option key={primitive.id} value={primitive.id}>
-                              {primitive.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <ComposerRange label="Width" min="0.25" max="4" step="0.05" value={selectedObject.width} onChange={(value) => patchSelected({ width: value })} />
-                      <ComposerRange label="Height" min="0.25" max="4" step="0.05" value={selectedObject.height} onChange={(value) => patchSelected({ height: value })} />
-                      <ComposerRange label="Depth" min="0.25" max="4" step="0.05" value={selectedObject.depth} onChange={(value) => patchSelected({ depth: value })} />
-                    </>
-                  ) : (
-                    <>
-                      <label className="composer-field">
-                        <span>Image</span>
-                        <select value={selectedObject.imageUrl || ""} onChange={(event) => patchSelected({ imageUrl: event.target.value, name: imageSources.find((item) => item.url === event.target.value)?.label || selectedObject.name })}>
-                          <option value="">No image</option>
-                          {selectedObject.imageUrl && !imageSources.some((item) => item.url === selectedObject.imageUrl) && (
-                            <option value={selectedObject.imageUrl}>Current image</option>
-                          )}
-                          {imageSources.map((item) => (
-                            <option key={item.url} value={item.url}>
-                              {item.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <ComposerRange label="Width" min="0.25" max="8" step="0.05" value={selectedObject.width} onChange={(value) => patchSelected({ width: value })} />
-                      <ComposerRange label="Height" min="0.25" max="8" step="0.05" value={selectedObject.height} onChange={(value) => patchSelected({ height: value })} />
-                      <ComposerRange label="Opacity" min="0.1" max="1" step="0.05" value={selectedObject.opacity} onChange={(value) => patchSelected({ opacity: value })} />
-                    </>
-                  )}
-                </>
-              )
-            ) : (
-              <div className="composer-empty-selection">Add a maquette or box to begin blocking.</div>
-            )}
-
-            {captureStatus && <small className="composer-status">{captureStatus}</small>}
-          </aside>
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function ComposerScrubInput({ label, value, min, max, step, axis, onChange }) {
-  const numericValue = finiteNumber(value, 0);
-  const minNumber = Number(min);
-  const maxNumber = Number(max);
-  const hasMin = min !== undefined && min !== null && min !== "" && Number.isFinite(minNumber);
-  const hasMax = max !== undefined && max !== null && max !== "" && Number.isFinite(maxNumber);
-  const stepValue = Math.max(finiteNumber(step, 1), 0.0001);
-  const precision = composerStepPrecision(stepValue);
-  const scrubAxis = axis || composerAxisForLabel(label);
-  const inputRef = React.useRef(null);
-  const dragRef = React.useRef(null);
-  const editingRef = React.useRef(false);
-  const [draftValue, setDraftValue] = React.useState(formatComposerControlValue(numericValue, precision));
-  const [dragging, setDragging] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!editingRef.current && !dragRef.current) {
-      setDraftValue(formatComposerControlValue(numericValue, precision));
-    }
-  }, [numericValue, precision]);
-
-  function normalizedValue(nextValue) {
-    let bounded = nextValue;
-    if (hasMin) bounded = Math.max(minNumber, bounded);
-    if (hasMax) bounded = Math.min(maxNumber, bounded);
-    const rounded = Math.round(bounded / stepValue) * stepValue;
-    return Number(rounded.toFixed(Math.min(6, precision + 2)));
-  }
-
-  function commitValue(nextValue) {
-    if (!Number.isFinite(nextValue)) {
-      setDraftValue(formatComposerControlValue(numericValue, precision));
-      return;
-    }
-
-    const next = normalizedValue(nextValue);
-    setDraftValue(formatComposerControlValue(next, precision));
-    onChange(next);
-  }
-
-  function handlePointerDown(event) {
-    if (event.button !== 0) return;
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startValue: numericValue,
-      dragging: false
-    };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }
-
-  function handlePointerMove(event) {
-    if (!dragRef.current) return;
-    const deltaX = event.clientX - dragRef.current.startX;
-    if (!dragRef.current.dragging && Math.abs(deltaX) < 4) return;
-
-    dragRef.current.dragging = true;
-    editingRef.current = false;
-    setDragging(true);
-    event.preventDefault();
-    const dragMultiplier = event.shiftKey ? 10 : 1;
-    commitValue(dragRef.current.startValue + deltaX * stepValue * dragMultiplier);
-  }
-
-  function handlePointerUp(event) {
-    const dragState = dragRef.current;
-    dragRef.current = null;
-    setDragging(false);
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    if (!dragState?.dragging) {
-      window.requestAnimationFrame(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      });
-    }
-  }
-
-  function handleFocus() {
-    editingRef.current = true;
-  }
-
-  function handleBlur() {
-    editingRef.current = false;
-    commitValue(Number(draftValue));
-  }
-
-  function handleKeyDown(event) {
-    if (event.key === "Enter") {
-      event.currentTarget.blur();
-    } else if (event.key === "Escape") {
-      editingRef.current = false;
-      setDraftValue(formatComposerControlValue(numericValue, precision));
-      event.currentTarget.blur();
-    }
-  }
-
-  return (
-    <span className={`composer-scrub-input ${dragging ? "dragging" : ""}`} style={{ "--axis-color": composerAxisColor(scrubAxis) }}>
-      <input
-        ref={inputRef}
-        type="text"
-        inputMode="decimal"
-        value={draftValue}
-        onChange={(event) => setDraftValue(event.target.value)}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        onKeyDown={handleKeyDown}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        title="Type a value, or drag left/right to slide"
-        aria-label={label}
-      />
-    </span>
-  );
-}
-
-function ComposerRange({ label, value, min, max, step, onChange }) {
-  return (
-    <label className="composer-field scrub">
-      <span>{label}</span>
-      <ComposerScrubInput label={label} value={value} min={min} max={max} step={step} onChange={onChange} />
-    </label>
-  );
-}
-
-function ComposerRotationRange({ label, value, onChange }) {
-  const degrees = radiansToDegrees(finiteNumber(value, 0));
-  return (
-    <ComposerRange
-      label={label}
-      min="-360"
-      max="360"
-      step="1"
-      value={degrees}
-      onChange={(nextDegrees) => onChange(degreesToRadians(nextDegrees))}
-    />
-  );
-}
-
-function ComposerVectorRange({ label, value, step = "0.05", onChange }) {
-  const vector = {
-    x: finiteNumber(value?.x, 0),
-    y: finiteNumber(value?.y, 0),
-    z: finiteNumber(value?.z, 0)
-  };
-  const patchAxis = (axis) => (nextValue) => {
-    onChange({
-      ...vector,
-      [axis]: nextValue
-    });
-  };
-
-  return (
-    <label className="composer-field scrub vector">
-      <span>{label}</span>
-      <span className="composer-vector-inputs">
-        <ComposerScrubInput label={`${label} X`} axis="x" step={step} value={vector.x} onChange={patchAxis("x")} />
-        <ComposerScrubInput label={`${label} Y`} axis="y" step={step} value={vector.y} onChange={patchAxis("y")} />
-        <ComposerScrubInput label={`${label} Z`} axis="z" step={step} value={vector.z} onChange={patchAxis("z")} />
-      </span>
-    </label>
-  );
-}
-
-function ComposerRotationVectorRange({ label, value, onChange }) {
-  const degrees = {
-    x: radiansToDegrees(finiteNumber(value?.x, 0)),
-    y: radiansToDegrees(finiteNumber(value?.y, 0)),
-    z: radiansToDegrees(finiteNumber(value?.z, 0))
-  };
-  const patchAxis = (axis) => (nextDegrees) => {
-    onChange({
-      ...value,
-      [axis]: degreesToRadians(nextDegrees)
-    });
-  };
-
-  return (
-    <label className="composer-field scrub vector">
-      <span>{label}</span>
-      <span className="composer-vector-inputs">
-        <ComposerScrubInput label={`${label} X`} axis="x" min="-360" max="360" step="1" value={degrees.x} onChange={patchAxis("x")} />
-        <ComposerScrubInput label={`${label} Y`} axis="y" min="-360" max="360" step="1" value={degrees.y} onChange={patchAxis("y")} />
-        <ComposerScrubInput label={`${label} Z`} axis="z" min="-360" max="360" step="1" value={degrees.z} onChange={patchAxis("z")} />
-      </span>
-    </label>
-  );
-}
-
-function composerAxisForLabel(label = "") {
-  const axisMatch = String(label).match(/\b([XYZ])$/i);
-  return axisMatch ? axisMatch[1].toLowerCase() : "";
-}
-
-function composerAxisColor(axis) {
-  if (axis === "x") return "#ff5a2f";
-  if (axis === "y") return "#86d747";
-  if (axis === "z") return "#4d8dff";
-  return "#ddc631";
-}
-
-function composerStepPrecision(step) {
-  const [, decimals = ""] = String(step).split(".");
-  return Math.min(4, decimals.length);
-}
-
-function formatComposerControlValue(value, precision) {
-  return Number(value).toFixed(Math.max(0, precision));
-}
 
 function NodeBody({
   node,
@@ -8217,7 +7494,6 @@ function NodeBody({
   onPreviewResizeStart,
   onPreviewOpen,
   onPreviewLayoutExport,
-  onOpenComposer,
   onFrameItCapture,
   onFrameItGenerate,
   onCanvasPanStart,
@@ -8245,6 +7521,16 @@ function NodeBody({
 
   if (node.type === "myNewt") {
     return <MyNewtNodeBody node={node} config={config} incoming={incoming} onUpdate={onUpdate} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} controller={myNewtController} />;
+  }
+  if (node.type === "explore") {
+    return <React.Suspense fallback={<div className="node-body">Loading Explore...</div>}><ExploreNodeBody node={node} config={config} incoming={incoming}
+      prompt={connectedText(incoming.promptIn) || node.data.prompt} onUpdate={onUpdate} onRun={onRun} onPreviewOpen={onPreviewOpen}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}
+      imageModels={imageModelOptions} provider={generationProvider} showApiCosts={showApiCosts}
+      ratios={imageModelAspectRatioOptions(node.data.model, generationProvider).filter(ratio => ratio !== "Auto")}
+      resolutions={imageModelResolutionOptions(node.data.model, generationProvider)}
+      qualities={isOpenAiImage25Model(node.data.model) ? openAiImage25QualityOptions : node.data.model === imageModelNames.openAiImage2 ? openAiImage2QualityOptions : []}
+      modelPatch={model => imageModelSelectionPatch(node.data, model, generationProvider)} /></React.Suspense>;
   }
   if (node.type === "editor") {
     const sources = ["videoIn", "audioIn"].flatMap(port => (incoming[port] || []).flatMap(({ source, edge }) => {
@@ -8326,24 +7612,6 @@ function NodeBody({
     );
   }
 
-  if (node.type === "composer") {
-    const imageOutputPort = config.output.find((port) => port.id === "imageOut");
-    const imageInputPort = config.input.find((port) => port.id === "imageIn");
-    const characterInputPorts = composerCharacterInputPortsForNode(node);
-    const composerInputPorts = [imageInputPort, ...characterInputPorts].filter(Boolean);
-
-    return (
-      <ComposerNodeBody
-        node={node}
-        imageOutputPort={imageOutputPort}
-        composerInputPorts={composerInputPorts}
-        onOpenComposer={onOpenComposer}
-        onConnectStart={onConnectStart}
-        onDisconnectInput={onDisconnectInput}
-        connectedPortKeys={connectedPortKeys}
-      />
-    );
-  }
 
   if (isFrameItNode(node)) {
     return (
@@ -8616,7 +7884,7 @@ function NodeBody({
                   <span className="character-section-label">Sheet Model</span>
                   <select
                     value={normalizeCharacterSheetModel(node.data.characterSheetModel)}
-                    title={generationProvider === "krea" && isOpenAiImage25Model(node.data.characterSheetModel) ? "GPT Image 2.5 Character sheets require Fal for 4K and protected wardrobe edits." : "Character sheet model"}
+                    title={generationProvider === "krea" && isOpenAiImage25Model(node.data.characterSheetModel) ? "GPT Image 2.5 Character sheets require Fal or Atlas for protected wardrobe edits; Krea does not accept edit masks." : "Character sheet model"}
                     disabled={compiling || locked}
                     onChange={(event) => onUpdate(node.id, { characterSheetModel: normalizeCharacterSheetModel(event.target.value) })}
                   >
@@ -10280,9 +9548,9 @@ function NodeBody({
     );
   }
 
-  if (node.type === "coverage") {
+  if (isCoverageNode(node)) {
     const inputPort = config.input.find((port) => port.id === "imageIn");
-    const coverageOutputPort = outputPortDefinitionsForNode(node).find((port) => port.id === "imageOut") || outputPort;
+    const coverageOutputPort = outputPortDefinitionsForNode(node).find((port) => port.id === outputPort?.id) || outputPort;
     const sourceConnected = Boolean(incoming.imageIn?.length);
     const sourceSummary = autoAspectSourceSummary(incoming.imageIn, "Connect image");
     const availableModels = coverageModelOptions.filter((model) => imageModelOptions.includes(model));
@@ -10293,6 +9561,7 @@ function NodeBody({
 
     return (
       <div className="node-body model-node-body coverage-node-body">
+        {node.type === "utility" && <UtilityImageToolSwitcher node={node} onUpdate={onUpdate} disabled={running} />}
         <ResultPane
           label="9 coverage angles will appear here"
           resultUrl={node.data.resultUrl}
@@ -10918,7 +10187,8 @@ function NodeBody({
             <>
               <NodeRow label="Model">
                 <select value={utilityImageModel} onChange={(event) => onUpdate(node.id, utilityImageModelSelectionPatch(node.data, event.target.value))}>
-                  <option>{utilityImageModelNames.autoAspect}</option>
+                  <option>{utilityImageModelNames.coverage}</option>
+          <option>{utilityImageModelNames.autoAspect}</option>
                   <option>{utilityImageModelNames.frameIt}</option>
                   <option>{utilityImageModelNames.model3d}</option>
                   <option>{utilityImageModelNames.colorIdMatte}</option>
@@ -11288,7 +10558,6 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
-    const isKrea2Large = isKrea2LargeImageModel(node.data.model);
     const isImage25 = isOpenAiImage25Model(node.data.model);
     const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2 || isImage25;
     const normalizeQuality = isImage25 ? normalizeOpenAiImage25Quality : normalizeOpenAiImage2Quality;
@@ -11304,7 +10573,7 @@ function NodeBody({
       : imageModelReferenceTagMatches(
           promptValue,
           imagePromptConnections,
-          isImageModelUnsupportedInput(node, "characterIn") ? [] : imageInstructionSources,
+          imageInstructionSources,
           incomingByNode
         );
     const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
@@ -11313,7 +10582,8 @@ function NodeBody({
       incomingByNode,
       { includeComposerCharacterBindings: true, prompt: promptValue }
     );
-    const imageRunCost = estimateImageRunCost({
+    const imagePriceSettings = {
+      kind: "image",
       model: node.data.model,
       resolution: node.data.resolution,
       aspectRatio: node.data.aspectRatio,
@@ -11321,7 +10591,7 @@ function NodeBody({
       referenceCount: pricedImagePromptItems.length,
       batchCount: isSam3Image ? 1 : node.data.batchCount,
       provider: generationProvider
-    });
+    };
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
     const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
     const transferPromptLabel = connectedSummary(incoming.transferIn, "Add mood board");
@@ -11332,20 +10602,16 @@ function NodeBody({
     const stylePort = config.input.find((port) => port.id === "styleIn");
     const transferPort = config.input.find((port) => port.id === "transferIn");
     const characterPort = config.input.find((port) => port.id === "characterIn");
-    const cameraInputUnsupported = isImageModelUnsupportedInput(node, "cameraIn");
-    const styleInputUnsupported = isImageModelUnsupportedInput(node, "styleIn");
-    const transferInputUnsupported = isImageModelUnsupportedInput(node, "transferIn");
-    const characterInputUnsupported = isImageModelUnsupportedInput(node, "characterIn");
     const settingsOpen = node.data.settingsOpen !== false;
     const collapsedPorts = isSam3Image
       ? [promptPort, imagePromptPort]
       : [
           promptPort,
           imagePromptPort,
-          cameraInputUnsupported ? null : cameraPort,
-          styleInputUnsupported ? null : stylePort,
-          transferInputUnsupported ? null : transferPort,
-          characterInputUnsupported ? null : characterPort
+          cameraPort,
+          stylePort,
+          transferPort,
+          characterPort
         ];
     return (
       <div className="node-body model-node-body image-model-body">
@@ -11379,7 +10645,7 @@ function NodeBody({
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
-            : !showApiCosts ? "Run Image" : (isImage25 || generationProvider === "atlas") && imageRunCost == null ? "Run Image (Variable cost)" : formatPricedRunLabel("Run Image", imageRunCost)}
+            : <RunPriceLabel label="Run Image" options={imagePriceSettings} visible={showApiCosts} />}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
@@ -11430,42 +10696,23 @@ function NodeBody({
               </select>
             </NodeRow>
           )}
-          {isKrea2Large && (
-            <NodeRow label="Creativity">
-              <select value={normalizeKrea2Creativity(node.data.kreaCreativity)} onChange={(event) => onUpdate(node.id, { kreaCreativity: event.target.value })}>
-                {krea2CreativityOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {formatKrea2Creativity(option)}
-                  </option>
-                ))}
-              </select>
-            </NodeRow>
-          )}
           <NodeRow label={isSam3Image ? "Image" : "Image Prompt"} inputPort={settingsOpen ? imagePromptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={imagePromptLabel !== "Add file" ? "connected-field" : ""}>{imagePromptLabel}</button>
           </NodeRow>
           {!isSam3Image && (
             <>
-              {!cameraInputUnsupported && (
-                <NodeRow label="Camera" inputPort={settingsOpen ? cameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                  <button className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{cameraPromptLabel}</button>
-                </NodeRow>
-              )}
-              {!styleInputUnsupported && (
-                <NodeRow label="Style" inputPort={settingsOpen ? stylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                  <button className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{stylePromptLabel}</button>
-                </NodeRow>
-              )}
-              {!transferInputUnsupported && (
-                <NodeRow label="Mood Board" inputPort={settingsOpen ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                  <button className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{transferPromptLabel}</button>
-                </NodeRow>
-              )}
-              {!characterInputUnsupported && (
-                <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                  <button className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{characterPromptLabel}</button>
-                </NodeRow>
-              )}
+              <NodeRow label="Camera" inputPort={settingsOpen ? cameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{cameraPromptLabel}</button>
+              </NodeRow>
+              <NodeRow label="Style" inputPort={settingsOpen ? stylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{stylePromptLabel}</button>
+              </NodeRow>
+              <NodeRow label="Mood Board" inputPort={settingsOpen ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{transferPromptLabel}</button>
+              </NodeRow>
+              <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{characterPromptLabel}</button>
+              </NodeRow>
               <NodeRow label="Generations">
                 <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                   {imageBatchOptions.map((option) => (
@@ -11578,7 +10825,8 @@ function NodeBody({
     videos: pricedReferenceVideos.length,
     audios: uniqueAssetItems(connectedAssetItems(displayIncoming.referenceAudioIn)).length
   } : null;
-  const videoRunCost = estimateVideoRunCost({
+  const videoPriceSettings = {
+    kind: "video",
     model: effectiveVideoModel,
     duration: effectiveVideoDuration,
     resolution: effectiveVideoResolution,
@@ -11586,9 +10834,12 @@ function NodeBody({
     generateAudio: effectiveVideoGenerateAudio,
     hasVideoReference: pricedReferenceVideos.length > 0,
     referenceImageCount: pricedReferenceImages.length,
+    startFrameCount: connectedAssetItems(displayIncoming.startFrameIn).length,
+    endFrameCount: connectedAssetItems(displayIncoming.endFrameIn).length,
+    audioReferenceCount: connectedAssetItems(displayIncoming.referenceAudioIn).length,
     batchCount: isSam3Video ? 1 : node.data.batchCount,
     provider: generationProvider
-  });
+  };
   const settingsOpen = node.data.settingsOpen !== false;
   const collapsedPorts = isWanFunControl
     ? [promptPort, activeDirectorPort, referenceVideoPort, referenceImagePort, characterPort]
@@ -11614,7 +10865,7 @@ function NodeBody({
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt || atlasVideoUnsupported} title={atlasVideoUnsupported ? "This video model is unavailable through Atlas Cloud" : undefined}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
-          : !showApiCosts ? "Run Video" : generationProvider === "atlas" && videoRunCost == null ? "Run Video (Variable cost)" : formatPricedRunLabel("Run Video", videoRunCost)}
+          : <RunPriceLabel label="Run Video" options={videoPriceSettings} visible={showApiCosts} />}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (
@@ -11930,7 +11181,7 @@ function NodeBody({
   );
 }
 
-function UtilityImageToolSwitcher({ node, onUpdate }) {
+function UtilityImageToolSwitcher({ node, onUpdate, disabled = false }) {
   const utilityImageModel = normalizedUtilityImageModelName(node.data.utilityImageModel);
 
   function setMode(nextMode) {
@@ -11946,11 +11197,12 @@ function UtilityImageToolSwitcher({ node, onUpdate }) {
     <div className="utility-specialized-switcher">
       <div className="utility-mode-tabs" role="tablist" aria-label="Utility mode">
         <button className="active" type="button" role="tab" aria-selected="true">Image</button>
-        <button type="button" role="tab" aria-selected="false" onClick={() => setMode("video")}>Video</button>
+        <button type="button" role="tab" aria-selected="false" disabled={disabled} onClick={() => setMode("video")}>Video</button>
       </div>
       <label className="utility-specialized-model">
         <span>Tool</span>
-        <select value={utilityImageModel} onChange={(event) => onUpdate(node.id, utilityImageModelSelectionPatch(node.data, event.target.value))}>
+        <select value={utilityImageModel} disabled={disabled} onChange={(event) => onUpdate(node.id, utilityImageModelSelectionPatch(node.data, event.target.value))}>
+          <option>{utilityImageModelNames.coverage}</option>
           <option>{utilityImageModelNames.autoAspect}</option>
           <option>{utilityImageModelNames.frameIt}</option>
           <option>{utilityImageModelNames.model3d}</option>
@@ -12399,11 +11651,6 @@ function getNodeConfig(type) {
       input: [],
       output: [{ id: "cameraOut", label: "Camera", color: portColors.camera }]
     },
-    composer: {
-      icon: Box,
-      input: [{ id: "imageIn", label: "Image Plane", color: portColors.image }],
-      output: [{ id: "imageOut", label: "Frame", color: portColors.image }]
-    },
     frameIt: {
       icon: PersonStanding,
       input: [],
@@ -12460,6 +11707,13 @@ function getNodeConfig(type) {
       icon: Aperture,
       input: [{ id: "imageIn", label: "Image", color: portColors.image }],
       output: [{ id: "imageOut", label: "Coverage", color: portColors.image }]
+    },
+    explore: {
+      icon: Compass,
+      input: [{ id: "promptIn", label: "Brief", color: portColors.prompt }, { id: "imageIn", label: "Image / Product", color: portColors.image },
+        { id: "characterIn", label: "Character", color: portColors.character }, { id: "transferIn", label: "Mood Board", color: portColors.transfer },
+        { id: "styleIn", label: "Style", color: portColors.style }, { id: "cameraIn", label: "Camera", color: portColors.camera }],
+      output: [{ id: "imageOut", label: "Images output", color: portColors.image }]
     },
     storyboard: {
       icon: Clapperboard,
@@ -12598,6 +11852,7 @@ function createDefaultNodeData(type, label, count) {
       advancedOpen: false
     };
   }
+  if (type === "explore") return { title, ...exploreDefaults() };
   if (type === "coverage") {
     return {
       title,
@@ -12654,17 +11909,6 @@ function createDefaultNodeData(type, label, count) {
       faceCount: 500000,
       resultType: "model3d",
       settingsOpen: false
-    };
-  }
-  if (type === "composer") {
-    const composerScene = defaultComposerScene();
-    return {
-      title,
-      composerAspectRatio: "16:9",
-      composerShowGuides: true,
-      composerSelectedId: composerScene.maquettes[0]?.id || "",
-      composerSavedPoses: [],
-      composerScene
     };
   }
   if (type === "frameIt") {
@@ -12866,7 +12110,6 @@ function createDefaultNodeData(type, label, count) {
       aspectRatio: "16:9",
       resolution: "2K",
       quality: openAiImage2Quality,
-      kreaCreativity: "raw",
       batchCount: "1",
       settingsOpen: true
     };
@@ -12897,7 +12140,6 @@ function imageModelSelectionPatch(data = {}, model, provider = "fal") {
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
     background: normalizeOpenAiImage25Background(data.background),
-    kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     batchCount: data.batchCount || "1",
     ...(isOpenAiImage25Model(model) && provider === "krea" ? openAiImage25KreaSelection({ ...data, model }) : {})
   };
@@ -12927,8 +12169,6 @@ function imageModelAspectRatioOptions(model, provider = "fal") {
 }
 
 function imageModelSupportedAspectRatios(model) {
-  if (isReve21Model(model)) return reve21AspectRatios;
-  if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
   return isOpenAiImageModel(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -12955,64 +12195,25 @@ function formatOpenAiImage2Quality(value) {
   return "High (Professional)";
 }
 
-function isKrea2LargeImageModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("krea") && normalized.includes("large");
-}
-
-function normalizeKrea2Creativity(value) {
-  return normalizeChoice(String(value || "raw").toLowerCase(), krea2CreativityOptions, "raw");
-}
-
-function formatKrea2Creativity(value) {
-  const text = normalizeKrea2Creativity(value);
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
-}
-
-function imageModelUnsupportedInputMessage(model) {
-  if (isKrea2LargeImageModel(model)) return "This input is not supported by the selected model.";
-  return "";
-}
-
-function imageModelUnsupportedInputPorts(model) {
-  if (isKrea2LargeImageModel(model)) return krea2UnsupportedInputPorts;
-  return emptyPortSet;
-}
-
-function imageModelUnsupportedSourceTypes(model) {
-  if (isKrea2LargeImageModel(model)) return krea2UnsupportedSourceTypes;
-  return emptyPortSet;
-}
-
-function isImageModelUnsupportedInput(node, portId) {
-  return node?.type === "imageModel" && imageModelUnsupportedInputPorts(node.data?.model).has(portId);
-}
-
-function isImageModelUnsupportedSource(target, source) {
-  return target?.type === "imageModel" && imageModelUnsupportedSourceTypes(target.data?.model).has(source?.type);
-}
-
 function imagePromptInputConnectionsForModel(model, incoming = {}) {
   return incoming.imagePromptIn || [];
 }
 
 function imageInstructionSourcesForModel(model, incoming = {}) {
-  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
   return [
     ...(incoming.imagePromptIn || []),
-    ...(!unsupportedPorts.has("cameraIn") ? incoming.cameraIn || [] : []),
-    ...(!unsupportedPorts.has("styleIn") ? incoming.styleIn || [] : []),
-    ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
-    ...(!unsupportedPorts.has("characterIn") ? incoming.characterIn || [] : [])
+    ...(incoming.cameraIn || []),
+    ...(incoming.styleIn || []),
+    ...(incoming.transferIn || []),
+    ...(incoming.characterIn || [])
   ];
 }
 
 function imageReferenceConnectionsForModel(model, incoming = {}) {
-  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
   return [
     ...(incoming.imagePromptIn || []),
-    ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
-    ...(!unsupportedPorts.has("characterIn") ? incoming.characterIn || [] : [])
+    ...(incoming.transferIn || []),
+    ...(incoming.characterIn || [])
   ];
 }
 
@@ -13109,8 +12310,7 @@ function normalizeImageModelResolution(value) {
 }
 
 function imageModelResolutionOptions(model, provider = "fal") {
-  if (isOpenAiImage25Model(model) && provider === "krea") return ["1K"];
-  if (isReve21Model(model)) return reve21ResolutionOptions;
+  if (isOpenAiImage25Model(model) && provider === "krea") return openAiImage25KreaResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;
 }
@@ -13291,6 +12491,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
 
 function normalizedUtilityImageModelName(model) {
   const normalized = String(model || "").toLowerCase();
+  if (isUtilityCoverageModel(normalized)) return utilityImageModelNames.coverage;
   if (isUtilityAutoAspectModel(normalized)) return utilityImageModelNames.autoAspect;
   if (isUtilityFrameItModel(normalized)) return utilityImageModelNames.frameIt;
   if (isUtilityModel3DModel(normalized)) return utilityImageModelNames.model3d;
@@ -13372,7 +12573,7 @@ function outputPortDefinitionsForNode(node) {
     return autoAspectOutputPortsForNode(node);
   }
   if (isModel3DNode(node)) return basePorts.map((port) => ({ ...port, color: portColors.model3d, label: "3D" }));
-  if (node?.type === "coverage") return basePorts.map((port) => ({
+  if (isCoverageNode(node)) return basePorts.map((port) => ({
     ...port,
     disabled: !normalizedResultItems(node?.data?.resultItems, node?.data?.resultUrl, "image").length,
     disabledReason: "Generate Coverage before connecting it"
@@ -13399,10 +12600,6 @@ function activeInputPortIdsForNode(node) {
       "propsIn",
       ...(node.data?.useStoryboardStyle === false ? ["styleIn", "transferIn", "characterIn"] : [])
     ];
-  }
-
-  if (node?.type === "imageModel") {
-    return inputPortIdsForNode(node).filter((portId) => !isImageModelUnsupportedInput(node, portId));
   }
 
   if (node?.type === "videoModel") {
@@ -13631,10 +12828,16 @@ function utilityImageModelSelectionPatch(data = {}, model) {
   const utilityImageModel = normalizedUtilityImageModelName(model);
   const commonPatch = {
     ...resetAutoAspectOutputPatch(),
+    ...resetCoverageOutputPatch(),
     utilityMode: "image",
     utilityImageModel,
     resultType: isUtilityModel3DModel(utilityImageModel) ? "model3d" : "image"
   };
+
+  if (isUtilityCoverageModel(utilityImageModel)) {
+    const defaults = createDefaultNodeData("coverage", data.title || "Utility", 1);
+    return normalizeCoverageData({ ...data, ...defaults, ...commonPatch });
+  }
 
   if (isUtilityFrameItModel(utilityImageModel)) {
     return {
@@ -13673,7 +12876,6 @@ function resetCoverageOutputPatch() {
 
 function coverageModelLabel(model) {
   if (model === imageModelNames.openAiImage2) return "GPT Image 2";
-  if (model === imageModelNames.reve21) return "REVE 2.1";
   return model;
 }
 
@@ -13721,7 +12923,7 @@ function nodeResultMediaType(node) {
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
   if (node.type === "audioModel") return "audio";
-  if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "coverage" || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
+  if (node.type === "imageModel" || node.type === "explore" || node.type === "autoAspect" || isCoverageNode(node) || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
   return "";
 }
 
@@ -13762,7 +12964,7 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
       ? imageModelReferenceTagMatches(
           prompt,
           imagePromptInputConnectionsForModel(node.data.model, incoming),
-          isImageModelUnsupportedInput(node, "characterIn") ? [] : imageInstructionSourcesForModel(node.data.model, incoming),
+          imageInstructionSourcesForModel(node.data.model, incoming),
           incomingByNode
         )
       : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && videoModelSupportsCharacterInput(node.data.model)
@@ -13818,8 +13020,6 @@ function buildInactiveEdgeIds(nodes, edges) {
       .filter((edge) => {
         const source = nodeMap.get(edge.from.nodeId);
         const target = nodeMap.get(edge.to.nodeId);
-        if (isImageModelUnsupportedInput(target, edge.to.port)) return true;
-        if (isImageModelUnsupportedSource(target, source)) return true;
         if (isVideoModelUnsupportedInput(target, edge.to.port)) return true;
         if (target?.type === "audioModel" && !audioInputEnabled(target.data.audioMode, edge.to.port)) return true;
         if (source?.type === "autoAspect" && !autoAspectOutputItem(source, edge)?.url) return true;
@@ -13829,7 +13029,7 @@ function buildInactiveEdgeIds(nodes, edges) {
           autoAspectRatioFromOutputPort(edge.from.port) &&
           !autoAspectOutputItem(source, edge)?.url
         ) return true;
-        if (source?.type === "coverage" && !normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length) return true;
+        if (isCoverageNode(source) && !normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length) return true;
         if (isFrameItNode(source) && !source.data?.resultUrl) return true;
         if (source?.type === "skillDirector" && (!source.data?.skillDirectorBuilt || !source.data?.resultText)) return true;
         return (
@@ -13844,6 +13044,7 @@ function buildInactiveEdgeIds(nodes, edges) {
 function connectedText(items = []) {
   return items
     .map(({ source }) => {
+      if (source.type === "explore") return "";
       if (source.type === "text") return source.data.resultText || source.data.text;
       if (source.type === "skillDirector") return source.data.resultText || source.data.text;
       if (source.type === "plainText") return source.data.text;
@@ -14043,6 +13244,7 @@ function expandStoryboardDirectorIncoming(incoming = {}, incomingByNode = {}) {
 }
 
 function connectedOutputItem(source, edge) {
+  if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
   if (source?.type === "editor" && (!source.data?.editorExportTimeline || editorRenderSignature(normalizeEditorTimeline(source.data.editorExportTimeline)) !== editorRenderSignature(normalizeEditorTimeline(source.data?.editorTimeline)))) return null;
   if (source?.type === "character") {
     if (!source.data?.locked || !source.data?.activated) return null;
@@ -14641,7 +13843,7 @@ function connectedPreviewSources(items = []) {
           sourceResultIndex: index,
           sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
           type: item.type || sourceType,
-          label: allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
+          label: source.type === "explore" && item.label ? item.label : allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
         }))
       };
     })
@@ -14650,6 +13852,7 @@ function connectedPreviewSources(items = []) {
 
 function previewSourceResultItems(source, edge, sourceType = "image") {
   if (!source) return [];
+  if (source.type === "explore" && edge?.from?.port !== "imageOut") return [];
   if (
     source.type === "storyboard" ||
     source.type === "autoAspect" ||
@@ -14660,7 +13863,7 @@ function previewSourceResultItems(source, edge, sourceType = "image") {
   }
 
   const resultItems = normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, sourceType);
-  if (source.type === "coverage" && resultItems.length) return coveragePreviewItems(resultItems);
+  if (isCoverageNode(source) && resultItems.length) return coveragePreviewItems(resultItems);
   if (resultItems.length) return resultItems;
 
   const outputItem = connectedOutputItem(source, edge);
@@ -15111,17 +14314,14 @@ async function resolveImageModelAspectRatio(node, incoming = {}) {
 }
 
 function imageModelAutoAspectInputUrls(incoming = {}, model = "") {
-  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
-  const unsupportedSources = imageModelUnsupportedSourceTypes(model);
   const portIds = [
     "imagePromptIn",
-    ...(!unsupportedPorts.has("cameraIn") ? ["cameraIn"] : []),
-    ...(!unsupportedPorts.has("transferIn") ? ["transferIn"] : [])
+    "cameraIn",
+    "transferIn"
   ];
   return portIds
     .flatMap((portId) => incoming[portId] || [])
     .map(({ source, edge }) => {
-      if (unsupportedSources.has(source?.type)) return "";
       const url = connectedOutputUrl(source, edge);
       if (!url) return "";
       return previewMediaType(source, edge) === "image" ? url : "";
@@ -15184,6 +14384,7 @@ function activeImageInstructionLabels(items = [], incomingByNode = null) {
               camera: "Camera",
               composer: composerCharacterBindingsForSource(source, incomingByNode).length ? "Composer guide + character map" : "Composer guide",
               style: "Style",
+              explore: "Image reference",
               transfer: "Mood Board",
               character: "Character identity"
             })[source.type])
@@ -15201,7 +14402,7 @@ function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNo
   const resolvedPrompt = resolveImageCharacterMentions(resolvedImagePrompt, characterSources, namedCharacterReferences);
   const supportingInstructions = items
     .filter(({ source }) => source.type !== "camera" && !isActiveComposerSource(source))
-    .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
+    .flatMap(({ source, edge }) => promptPiecesForSource(source, { namedCharacterReferences, outputPort: edge?.from?.port }))
     .filter(Boolean);
   const composerCharacterInstructions = composerCharacterMappingPromptPieces(items, incomingByNode, namedCharacterReferences);
   const cameraInstructions = items
@@ -15226,6 +14427,7 @@ function isActiveComposerSource(source) {
 }
 
 function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
+  if (source.type === "explore") return [];
   if (source.type === "camera") {
     return cameraPromptPieces(source);
   }
@@ -15698,7 +14900,7 @@ function sourceLabel(source) {
       : title || "Director";
   }
   if (source.type === "autoAspect") return source.data.title || "Auto Aspect";
-  if (source.type === "coverage") return source.data.title || "Coverage";
+  if (isCoverageNode(source)) return source.data.title || "Coverage";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "Style Reference";
   if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
@@ -15792,14 +14994,14 @@ function keepLatestSingleImageInputs(edges = [], nodeMap = new Map()) {
   const latestInputIndexes = new Map();
   edges.forEach((edge, index) => {
     const target = nodeMap.get(edge.to.nodeId);
-    if ((isAutoAspectNode(target) || target?.type === "coverage") && edge.to.port === "imageIn") {
+    if ((isAutoAspectNode(target) || isCoverageNode(target)) && edge.to.port === "imageIn") {
       latestInputIndexes.set(edge.to.nodeId, index);
     }
   });
   if (!latestInputIndexes.size) return edges;
   return edges.filter((edge, index) => {
     const target = nodeMap.get(edge.to.nodeId);
-    if (!(isAutoAspectNode(target) || target?.type === "coverage") || edge.to.port !== "imageIn") return true;
+    if (!(isAutoAspectNode(target) || isCoverageNode(target)) || edge.to.port !== "imageIn") return true;
     return latestInputIndexes.get(edge.to.nodeId) === index;
   });
 }
@@ -16035,10 +15237,7 @@ function normalizeCurrentNode(node) {
   }
 
   if (nextNode.type === "composer") {
-    return {
-      ...nextNode,
-      data: normalizeComposerData(data)
-    };
+    return migrateRetiredNode(nextNode);
   }
 
   if (nextNode.type === "frameIt") {
@@ -16062,12 +15261,10 @@ function normalizeCurrentNode(node) {
   }
 
   if (nextNode.type === "audioModel") return { ...nextNode, data: normalizeAudioModelData(data) };
+  if (nextNode.type === "explore") return { ...nextNode, data: normalizeExploreData(data) };
 
   if (nextNode.type === "coverage") {
-    return {
-      ...nextNode,
-      data: normalizeCoverageData(data)
-    };
+    return normalizeCurrentNode(migrateRetiredNode(nextNode));
   }
 
   if (nextNode.type === "style") {
@@ -16565,16 +15762,17 @@ function storyboardFrameCountForNode(node, incoming = null) {
 
 function storyboardFramesFromPlan(frames = []) {
   if (!Array.isArray(frames)) return [];
-  return frames.slice(0, storyboardMaxFrameCount).map((frame, index) =>
-    createStoryboardFrame(index + 1, {
+  return frames.slice(0, storyboardMaxFrameCount).map((frame, index) => {
+    const normalized = createStoryboardFrame(index + 1, {
       shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
       lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
       angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
       beat: frame.beat || "",
       prompt: frame.prompt || "",
       notes: frame.notes || ""
-    })
-  );
+    });
+    return { ...normalized, ...storyboardPlannedCastPatch({ ...normalized, cast: frame.cast }) };
+  });
 }
 
 function normalizeStoryboardQcForClient(qc = {}) {
@@ -16622,23 +15820,6 @@ function storyboardCharacterSummariesForNode(node, externalItems = [], incomingB
   }
 
   return externalCharacters;
-}
-
-function storyboardMissingRequiredCharacterTags(node, externalItems = [], incomingByNode = null, text = "", options = {}) {
-  const knownTags = storyboardCharacterSummariesForNode(node, externalItems, incomingByNode, options)
-    .map((character) => character.tag)
-    .filter(Boolean);
-  if (!knownTags.length) return [];
-
-  const availableTags = new Set(
-    storyboardCharacterSourcesForNode(node, externalItems, incomingByNode, options)
-      .map((source) => characterTag(source).toLowerCase())
-      .filter(Boolean)
-  );
-
-  return knownTags
-    .filter((tag) => promptHasTag(text, tag))
-    .filter((tag) => !availableTags.has(tag.toLowerCase()));
 }
 
 function storyboardPreparedCharacterCount(node) {
@@ -16701,6 +15882,22 @@ function storyboardCharacterReferenceItemForSource(source) {
     url: characterOutputReference(source.data)?.url || "",
     label: characterReferenceLabel(source, true)
   };
+}
+
+function storyboardFrameCastForNode(node, frame, incoming = {}, incomingByNode = null, options = {}) {
+  const includeInternal = options.includeInternal ?? !connectedDirectorPackageSource(incoming.directorIn || []);
+  const summaries = storyboardCharacterSummariesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal });
+  assertStoryboardCharacterTags(summaries);
+  const sources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal });
+  const references = summaries.map((character) => {
+    const source = sources.find((item) => characterTag(item).toLowerCase() === character.tag.toLowerCase());
+    return {
+      ...character,
+      url: source ? characterOutputReference(source.data)?.url || "" : "",
+      label: source ? characterReferenceLabel(source, true) : `${character.tag} Character Sheet`
+    };
+  });
+  return resolveStoryboardFrameCast(frame, references);
 }
 
 function storyboardImagePromptItems(node, incoming = {}, incomingByNode = null, options = {}) {
@@ -16791,14 +15988,6 @@ function storyboardImagePromptItemsForFrame(baseItems = [], continuityReferenceI
   ]);
 }
 
-function storyboardCharacterReferenceMapPrompt(characterSources = []) {
-  if (!characterSources.length) return "";
-  const mappings = characterSources
-    .map((source) => `@${characterTag(source)} = uploaded image reference labeled "${characterReferenceLabel(source, true)}"`)
-    .join("; ");
-  return `Character reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching character sheet exactly for that character's face, hair, body proportions, selected wardrobe, and recognizable details. Keep each named character visually distinct and do not substitute one character sheet for another.`;
-}
-
 function storyboardSceneReferenceSources(items = [], incomingByNode = null) {
   const uniqueSources = new Map();
 
@@ -16821,12 +16010,15 @@ function storyboardSceneReferenceSources(items = [], incomingByNode = null) {
   return [...uniqueSources.values()];
 }
 
-function storyboardSceneReferenceMapPrompt(referenceSources = []) {
+function storyboardSceneReferenceMapPrompt(referenceSources = [], useStoryboardStyle = true) {
   if (!referenceSources.length) return "";
   const mappings = referenceSources
     .map((source) => `@${source.tag} = uploaded location reference labeled "${source.label}"`)
     .join("; ");
-  return `Location reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching uploaded image for environment layout, architecture, geography, materials, lighting logic, palette, and recurring set details. Preserve the Storyboard node's final drawing style and do not copy a photographic rendering style. Do not merge multiple named locations into one frame unless the scene explicitly requires it.`;
+  const rendering = useStoryboardStyle !== false
+    ? "Translate its lighting and surfaces into simple monochrome value groups, not source colors or photographic texture."
+    : "Preserve relevant materials and palette within the user's chosen rendering style.";
+  return `Location reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching uploaded image for environment layout, architecture, geography, lighting direction, and recurring set details. ${rendering} Do not merge multiple named locations into one frame unless the scene explicitly requires it.`;
 }
 
 function storyboardSceneReferenceSummaries(items = [], incomingByNode = null) {
@@ -16841,12 +16033,15 @@ function storyboardPropReferenceSources(items = [], incomingByNode = null) {
   return storyboardSceneReferenceSources(items, incomingByNode);
 }
 
-function storyboardPropReferenceMapPrompt(propSources = []) {
+function storyboardPropReferenceMapPrompt(propSources = [], useStoryboardStyle = true) {
   if (!propSources.length) return "";
   const mappings = propSources
     .map((source) => `@${source.tag} = uploaded prop reference labeled "${source.label}"`)
     .join("; ");
-  return `Prop reference map: ${mappings}. Use each matching uploaded image only for that named product, object, wardrobe item, tool, set dressing, or practical element. Preserve its recognizable shape, materials, color, graphics, and important details while keeping the Storyboard node's drawing style. Do not force a prop into frames that do not name or require it.`;
+  const rendering = useStoryboardStyle !== false
+    ? "Preserve its recognizable shape and story-relevant features as simple monochrome linework/value groups, not source hues or rendered material textures."
+    : "Preserve its recognizable shape, materials, color and important details within the user's chosen rendering style.";
+  return `Prop reference map: ${mappings}. Use each matching uploaded image only for that named product, object, wardrobe item, tool, set dressing, or practical element. ${rendering} Do not force a prop into frames that do not name or require it.`;
 }
 
 function storyboardPropReferenceSummaries(items = [], incomingByNode = null) {
@@ -16892,103 +16087,27 @@ function storyboardRequiredPropSourcesForFrame(frame, sceneDescription = "", pro
   return [];
 }
 
-function storyboardCharacterSourcesTaggedInText(characterSources = [], text = "") {
-  const uniqueSources = new Map();
-  characterSources.forEach((source) => {
-    const tag = characterTag(source);
-    if (tag && promptHasTag(text, tag)) uniqueSources.set(tag.toLowerCase(), source);
-  });
-  return [...uniqueSources.values()];
-}
-
-function storyboardRequiredCharacterSourcesForFrame(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
-  const directorControlsScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
-  const characterSources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal: options.includeInternal ?? !directorControlsScene });
-  const framePrompt = frame.prompt || frame.beat || "";
-  const frameTagText = [framePrompt, frame.beat, frame.notes].filter(Boolean).join("\n");
-  const frameTaggedCharacterSources = storyboardCharacterSourcesTaggedInText(characterSources, frameTagText);
-  if (frameTaggedCharacterSources.length) return frameTaggedCharacterSources;
-
-  const sceneTaggedCharacterSources = storyboardCharacterSourcesTaggedInText(characterSources, sceneDescription);
-  if (characterSources.length === 1 && /\b(character|person|subject|hero|protagonist|man|woman|boy|girl|he|she|they|their|him|her)\b/i.test(frameTagText || sceneDescription)) {
-    return characterSources;
-  }
-
-  return !frameTagText.trim() ? sceneTaggedCharacterSources : [];
-}
-
-function storyboardRequiredCastPrompt(requiredSources = []) {
-  if (!requiredSources.length) return "";
-  const cast = requiredSources
-    .map((source) => `@${characterTag(source)} must use "${characterReferenceLabel(source, true)}"`)
-    .join("; ");
-  return `Required character cast for this frame: ${cast}. Every @tag named in this frame must be represented by its own matching character sheet. Do not omit, merge, swap, gender-shift, age-shift, or replace these tagged characters. If a tagged character is described as off-screen, keep them off-screen but preserve the correct eyeline and screen direction.`;
-}
-
-function storyboardFrameCharacterIsolationPrompt(activeSources = [], allSources = []) {
-  if (!activeSources.length) return "";
-  const activeKeys = new Set(activeSources.map((source) => characterTag(source).toLowerCase()).filter(Boolean));
-  const activeList = activeSources
-    .map((source) => `@${characterTag(source)} = "${characterReferenceLabel(source, true)}"`)
-    .join("; ");
-  const inactiveList = allSources
-    .filter((source) => {
-      const tag = characterTag(source);
-      return tag && !activeKeys.has(tag.toLowerCase());
-    })
-    .map((source) => `@${characterTag(source)}`)
-    .filter(Boolean)
-    .join(", ");
-  return [
-    `Frame character lock: active character sheets for this frame are ${activeList}.`,
-    "Use only these active sheets for visible character identity, face, hair, body proportions, wardrobe, and recognizable details.",
-    inactiveList ? `Ignore inactive character sheets for this frame: ${inactiveList}.` : "",
-    "Do not borrow, merge, swap, or blend faces, hair, wardrobe, body type, or names between character sheets. Verify every visible @tag matches its own sheet before output."
-  ].filter(Boolean).join(" ");
-}
-
-function resolveStoryboardCharacterMentions(prompt, characterSources = []) {
-  return characterSources.reduce((value, source) => {
-    const tag = characterTag(source);
-    const replacement = `@${tag} (the character from uploaded reference "${characterReferenceLabel(source, true)}")`;
-    return replacePromptTag(value, tag, replacement);
-  }, String(prompt || ""));
-}
-
 function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
   const directorControlsScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
-  const characterSources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal: !directorControlsScene });
+  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
   const sceneReferenceSources = Array.isArray(options.activeLocationSources)
     ? options.activeLocationSources
     : storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], incomingByNode);
   const propSources = Array.isArray(options.activePropSources)
     ? options.activePropSources
     : storyboardPropReferenceSources(incoming.propsIn || [], incomingByNode);
-  const namedCharacterReferences = characterSources.length > 0;
   const framePrompt = frame.prompt || frame.beat || sceneDescription || "Storyboard frame";
   const aspectRatio = storyboardAspectRatioForNode(node);
   const scenePlanningNote = directorControlsScene ? "" : String(node.data.storyboardNotes || "").trim();
-  const frameTagText = [framePrompt, frame.beat, frame.notes].filter(Boolean).join("\n");
-  const requiredCharacterSources = Array.isArray(options.requiredCharacterSources)
-    ? options.requiredCharacterSources
-    : storyboardRequiredCharacterSourcesForFrame(node, frame, sceneDescription, incoming, incomingByNode, { includeInternal: !directorControlsScene });
-  const activeCharacterSources = Array.isArray(options.activeCharacterSources)
-    ? options.activeCharacterSources
-    : (requiredCharacterSources.length ? requiredCharacterSources : characterSources);
-  const resolvedPrompt = resolveStoryboardCharacterMentions(framePrompt, characterSources);
-  const resolvedSceneDescription = resolveStoryboardCharacterMentions(sceneDescription, characterSources);
-  const characterReferenceMap = storyboardCharacterReferenceMapPrompt(activeCharacterSources);
-  const sceneReferenceMap = storyboardSceneReferenceMapPrompt(sceneReferenceSources);
-  const propReferenceMap = storyboardPropReferenceMapPrompt(propSources);
-  const requiredCastPrompt = storyboardRequiredCastPrompt(requiredCharacterSources);
-  const characterIsolationPrompt = storyboardFrameCharacterIsolationPrompt(activeCharacterSources, characterSources);
+  const castReferences = options.castReferences || storyboardFrameCastForNode(node, frame, incoming, incomingByNode).references;
+  const castPrompt = storyboardCastPrompt(frame, castReferences);
+  const sceneReferenceMap = storyboardSceneReferenceMapPrompt(sceneReferenceSources, storyboardStyleEnabled);
+  const propReferenceMap = storyboardPropReferenceMapPrompt(propSources, storyboardStyleEnabled);
   const cameraPieces = [
     shotPresetPrompts[frame.shot] || "",
     lensPresetPrompts[frame.lens] || "",
     typePresetPrompts[frame.angle] || ""
   ].filter(Boolean);
-  const characterPieces = activeCharacterSources.flatMap((source) => characterImagePromptPieces(source, namedCharacterReferences));
-  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
   const moodBoardConnected = Boolean(storyboardStyleEnabled && node.data.useMoodBoard !== false && node.data.storyboardMoodBoardUrl);
   const stylePieces = storyboardStyleEnabled
     ? [stylePresetPrompts.Storyboard, storyboardBaseInstruction]
@@ -16997,14 +16116,14 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
     ? (moodBoardConnected ? [storyboardMoodBoardStyleInstruction] : [])
     : (incoming.transferIn || []).flatMap(({ source }) => promptPiecesForSource(source));
   const sceneContinuityPieces = [
-    resolvedSceneDescription
-      ? `Scene continuity bible: ${resolvedSceneDescription}. Preserve the same environment, lighting source and direction, recurring objects, wardrobe, and spatial geography across the sequence. Use the current frame prompt for the exact camera angle and story moment.`
+    sceneDescription
+      ? `Scene background context only (not a cast list or a request to illustrate every beat): ${sceneDescription}. Preserve relevant environment, lighting, recurring objects and physical geography. Only the current frame prompt and FRAME CAST AND BLOCKING determine visible people, their camera-relative positions, action and shot. Do not import other scene characters into this frame.`
       : "",
     options.hasPreviousFrameReference
-      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it as the last approved continuity frame for the immediately preceding story beat, lighting direction, character identity, wardrobe, and recurring objects. Do not copy its rendering style if it looks photographic or overly realistic. Do not let an insert, cutaway, object close-up, or detail shot redefine the room geography, character screen position, or 180 degree line.`
+      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it for the preceding action state, lighting direction and recurring objects. It is NOT an identity source: the named character sheets remain identity authority. Do not copy its other cast, faces, framing or rendering style into the new shot. Do not let an insert or close-up redefine room geography or the 180 degree line. Follow current-frame blocking, including intentional camera reverses and crossings.`
       : "",
     options.hasSpatialAnchorReference
-      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it as the approved spatial anchor for room layout, character side of frame, screen direction, eyelines, blocking, lighting direction, and object placement. Use the anchor for geography only, not rendering style. The current frame prompt still controls the new shot size, camera angle, and story moment; do not copy the anchor's exact composition unless requested.`
+      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it for physical room geography and object placement only, not identity or rendering style. The current frame's cast, camera-relative blocking, eyelines, camera angle and story moment take priority; do not copy the anchor's cast or exact composition unless requested.`
       : ""
   ].filter(Boolean);
   const frameHeader = [
@@ -17018,18 +16137,16 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
 
   return [
     frameHeader,
-    resolvedPrompt,
+    framePrompt,
+    castPrompt,
     ...cameraPieces,
     storyboardContinuityInstruction,
-    characterReferenceMap,
     sceneReferenceMap,
     propReferenceMap,
-    requiredCastPrompt,
-    characterIsolationPrompt,
     ...sceneContinuityPieces,
     ...stylePieces,
     ...moodBoardPieces,
-    ...characterPieces,
+    storyboardPromptPolicy(storyboardStyleEnabled),
     storyboardStyleEnabled ? storyboardReferenceStyleGuard : "",
     storyboardStyleEnabled ? storyboardFinalStyleClamp : "",
     "Output only the image. Do not include captions, labels, panel borders, numbering, or text unless specifically requested in the frame prompt."
@@ -17100,9 +16217,10 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const model = imageModelOptions.includes(data.model) ? data.model : imageModelNames.openAiImage2;
+  const model = imageModelOptions.includes(data.model) ? data.model : data.model ? imageModelNames.nanoBananaPro : imageModelNames.openAiImage2;
+  const { kreaCreativity: _retiredControl, ...savedData } = data;
   return {
-    ...data,
+    ...savedData,
     title: data.title || "Image Model",
     model,
     prompt: data.prompt || "",
@@ -17110,7 +16228,6 @@ function normalizeImageModelData(data = {}) {
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
     background: normalizeOpenAiImage25Background(data.background),
-    kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     batchCount: data.batchCount || "1",
     settingsOpen: data.settingsOpen !== false
   };
@@ -17195,21 +16312,6 @@ function normalizeVideoModelData(data = {}) {
   };
 }
 
-function normalizeComposerData(data = {}) {
-  const { prompt: _legacyPrompt, ...composerData } = data;
-  const composerScene = normalizedComposerScene(data.composerScene);
-  const selectedStillExists = data.composerSelectedId === "camera" || [...composerScene.maquettes, ...composerScene.props, ...composerScene.imagePlanes].some((item) => item.id === data.composerSelectedId);
-  return {
-    ...composerData,
-    title: data.title || "Composer",
-    composerAspectRatio: normalizeComposerAspectRatio(data.composerAspectRatio),
-    composerShowGuides: data.composerShowGuides !== false,
-    composerSelectedId: selectedStillExists ? data.composerSelectedId : composerScene.maquettes[0]?.id || composerScene.props[0]?.id || composerScene.imagePlanes[0]?.id || "camera",
-    composerSelectedCameraBookmark: data.composerSelectedCameraBookmark || "",
-    composerSavedPoses: normalizeComposerSavedPoses(data.composerSavedPoses),
-    composerScene
-  };
-}
 
 function normalizeCharacterSheetVariants(data = {}) {
   const existing = Array.isArray(data.characterSheetVariants)
@@ -17246,7 +16348,9 @@ function normalizeUtilityData(data = {}) {
     ? normalizeFrameItData(data)
     : utilityModeValue === "image" && isUtilityModel3DModel(utilityImageModel)
       ? normalizeModel3DData(data)
-      : data;
+      : utilityModeValue === "image" && isUtilityCoverageModel(utilityImageModel)
+        ? normalizeCoverageData(data)
+        : data;
   const selectedAspectRatios = normalizedAutoAspectRatios(data);
   const activeAspectKeys = new Set(autoAspectTargetsForData({ selectedAspectRatios }).map(autoAspectTargetKey));
   const autoAspectResults = normalizedAutoAspectResults(data).filter((result) => activeAspectKeys.has(result.key));
@@ -17259,7 +16363,7 @@ function normalizeUtilityData(data = {}) {
     ...specializedData,
     title: specializedData.title || "Utility",
     utilityMode: utilityModeValue,
-    model: isUtilityModel3DModel(utilityImageModel) ? specializedData.model : videoModelNames.wanFunControl,
+    model: isUtilityModel3DModel(utilityImageModel) || (utilityModeValue === "image" && isUtilityCoverageModel(utilityImageModel)) ? specializedData.model : videoModelNames.wanFunControl,
     utilityImageModel,
     utilityVideoModel,
     selectedAspectRatios,
@@ -17535,8 +16639,6 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
 
   if (!inputPortIdsForNode(target).includes(nextEdge.to.port)) return null;
   if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) return null;
-  if (isImageModelUnsupportedInput(target, nextEdge.to.port)) return null;
-  if (isImageModelUnsupportedSource(target, source)) return null;
   if (isVideoModelUnsupportedInput(target, nextEdge.to.port)) return null;
   if (!portsAreCompatible(source, nextEdge.from.port, target, nextEdge.to.port)) return null;
 

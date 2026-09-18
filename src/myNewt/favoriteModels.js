@@ -24,7 +24,7 @@ export function myNewtFavoriteCreationPatch(type, settings, catalog = [], explic
   if (Object.hasOwn(explicitPatch, field)) return {};
   const model = normalizeMyNewtFavoriteModels(settings)[preference];
   if (!model || !catalog.find((entry) => entry.type === modelType)?.options?.model?.includes(model)) return {};
-  if (!catalog.find((entry) => entry.type === type)?.options?.[field]?.includes(model)) return {};
+  if (!(catalog.find((entry) => entry.type === type) || (type === "coverage" && catalog.find((entry) => entry.type === "utility")))?.options?.[field]?.includes(model)) return {};
   if (modelType === "videoModel" && (musicRequired || explicitPatch.skillApproach === "music-video") && !filmDirectorVideoModelSupportsMusic(model)) return {};
   return { [field]: model };
 }

@@ -6,11 +6,13 @@ import { isOpenAiImage25Model } from "../src/openAiImage25.js";
 import sharp from "sharp";
 import { normalizeOpenAiEditMask } from "./openai-edit-mask.js";
 
-export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets = async () => {} }) {
+export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets = async () => {}, quoteInput = async () => null }) {
+  async function quotedCost(cost, input, key) {
+    try { const quote = await quoteInput(input, key); return quote ? { ...cost, ...quote, unitRateUsd: cost.units > 0 ? quote.amountUsd / cost.units : null } : cost; }
+    catch { return cost; }
+  }
   async function image({ model, prompt, imageInputs = [], aspectRatio, resolution = "2K", quality = "high", background = "auto", editMaskInput, size: explicitSize }, key) {
     const openAi = model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model);
-    // REVE has fixed 4K output; Newt's hidden resolution/quality fields are not REVE controls.
-    if (model === imageModelNames.reve21 && String(resolution).toUpperCase() === "2K") resolution = "4K";
     const size = openAi ? explicitSize === undefined ? imageSize({ aspectRatio, resolution }) : explicitSize : undefined;
     if (!openAi) quality = "high";
     if (!isOpenAiImage25Model(model)) background = "auto";
@@ -26,11 +28,12 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
       }
       editMaskInput = await normalizeOpenAiEditMask(editMaskInput, imageInputs[0]);
     }
-    const cost = estimateAtlasImageCost({ ...options, referenceCount: imageInputs.length });
+    let cost = estimateAtlasImageCost({ ...options, referenceCount: imageInputs.length });
     const images = [];
     for (const asset of imageInputs) images.push(await client.upload(asset, key));
     const maskUrl = editMaskInput ? await client.upload(editMaskInput, key) : "";
     const input = buildAtlasImageRequest({ ...options, images, maskUrl });
+    cost = await quotedCost(cost, input, key);
     const result = await client.generate({ mediaType: "image", input, key });
     return { ...result, endpoint: input.model, provider: "Atlas Cloud", cost,
       remoteImage: { url: result.url, content_type: "image/png" },
@@ -48,7 +51,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
       images: images.map(() => placeholder), videos: videos.map(() => placeholder), audios: audios.map(() => placeholder) });
     await validateVideoAssets({ ...options, startImage, endImage, images, videos, audios });
     const routeKind = startImage ? "image-to-video" : images.length || videos.length || audios.length ? "reference-to-video" : "text-to-video";
-    const cost = estimateAtlasVideoCost({ ...options, routeKind, referenceImageCount: images.length, hasVideoReference: videos.length > 0 });
+    let cost = estimateAtlasVideoCost({ ...options, routeKind, referenceImageCount: images.length, hasVideoReference: videos.length > 0 });
     const uploaded = {};
     const upload = async (source) => client.upload(typeof source === "string" ? await readLocalAsset(source) : source, key);
     for (const [field, values] of Object.entries({ images, videos, audios })) {
@@ -58,6 +61,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     const input = buildAtlasVideoRequest({ ...options, ...uploaded,
       startImage: startImage ? await upload(startImage) : "",
       endImage: endImage ? await upload(endImage) : "" });
+    cost = await quotedCost(cost, input, key);
     const result = await client.generate({ mediaType: "video", input, key });
     return { ...result, endpoint: input.model, cost, input, sourceAspect, provider: "Atlas Cloud",
       remoteVideo: { url: result.url, content_type: "video/mp4" } };

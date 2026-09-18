@@ -4,12 +4,10 @@ import { parse } from "parse5";
 export const KREA_PRICING_URL = "https://api.krea.ai/openapi.json";
 export const OPENAI_PRICING_URL = "https://developers.openai.com/api/docs/pricing.md";
 export const GOOGLE_PRICING_URL = "https://ai.google.dev/gemini-api/docs/pricing";
-export const FAL_PRICING_URL = "https://api.fal.ai/v1/models/pricing";
 
 export const kreaPricingModels = [
   ["/generate/image/google/nano-banana-2", ["resolution"]],
   ["/generate/image/google/nano-banana-pro", ["resolution"]],
-  ["/generate/image/krea/krea-2/large", ["k2BillingTier"]],
   ["/generate/video/bytedance/seedance-2", ["resolution", "hasVideoReference", "duration"]],
   ["/generate/video/bytedance/seedance-2-5", ["resolution", "hasVideoReference", "duration"]],
   ["/generate/video/kling/kling-3.0", ["mode", "generateAudio", "duration"]],
@@ -18,26 +16,6 @@ export const kreaPricingModels = [
   ["/generate/image/openai/gpt-image-2.5-sunburst", null],
   ["/generate/image/openai/gpt-image-2.5-flare", null],
   ["/generate/3d/tencent/hunyuan3d-3.1-pro", null]
-];
-
-// A single Fal unit rate is sufficient only for these explicitly verified fixed-price routes.
-export const falFixedPricing = {
-  "reve/2.1/text-to-image": { unit: "image", baseline: 0.25 },
-  "reve/2.1/edit": { unit: "image", baseline: 0.25 },
-  "reve/2.1/remix": { unit: "image", baseline: 0.25 }
-};
-export const falPricingEndpoints = [
-  ...Object.keys(falFixedPricing), "fal-ai/nano-banana-pro", "fal-ai/nano-banana-pro/edit",
-  "fal-ai/nano-banana-2", "fal-ai/nano-banana-2/edit", "openai/gpt-image-2", "openai/gpt-image-2/edit",
-  ...["sunburst", "flare"].flatMap((variant) => ["text-to-image", "edit"].map((route) => `openai/gpt-image-2.5/${variant}/${route}`)),
-  "krea/v2/large/text-to-image",
-  ...["2.0", "2.5"].flatMap((version) => ["text-to-video", "image-to-video", "reference-to-video"].map((route) => `bytedance/seedance-${version}/${route}`)),
-  ...["pro", "4k"].flatMap((mode) => (mode === "pro" ? ["text-to-video", "reference-to-video"] : ["text-to-video", "image-to-video", "reference-to-video"]).map((route) => `fal-ai/kling-video/o3/${mode}/${route}`)),
-  "minimax/h3/text-to-video", "minimax/h3/image-to-video", "minimax/h3/reference-to-video",
-  "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d", "fal-ai/sam-3/image", "fal-ai/sam-3/video",
-  "fal-ai/dwpose", "fal-ai/image-preprocessors/depth-anything/v2", "fal-ai/birefnet/v2", "fal-ai/patina",
-  "fal-ai/qwen-image-edit-2511-multiple-angles", "fal-ai/bytedance-upscaler/upscale/video", "fal-ai/topaz/upscale/video",
-  "fal-ai/wan-fun-control", "fal-ai/wan-vace", "fal-ai/void-video-inpainting", "fal-ai/wan-vace-14b/inpainting", "fal-ai/birefnet/v2/video", "fal-ai/rife/video"
 ];
 
 const money = (text) => /^\$\d+(?:\.\d+)?$/.test(text.trim()) ? Number(text.trim().slice(1)) : NaN;
@@ -75,27 +53,10 @@ export function parseKreaPricing(schema) {
       for (const point of entry.points || []) for (const [key, value] of Object.entries(point.dimensions)) {
         if (["duration", "billableSeconds", "referenceImageCount"].includes(key) && (!Number.isInteger(value) || value < 0 || value > 30)) throw new Error("Numeric billing dimensions changed; review required.");
         if (["hasVideoReference", "generateAudio"].includes(key) && typeof value !== "boolean") throw new Error("Audio/reference billing dimensions changed; review required.");
-        if (["resolution", "mode", "k2BillingTier"].includes(key) && (typeof value !== "string" || value.length > 40)) throw new Error("Invalid pricing dimension.");
+        if (["resolution", "mode"].includes(key) && (typeof value !== "string" || value.length > 40)) throw new Error("Invalid pricing dimension.");
       }
       return { ...result, entry: validatePricingEntry(entry) };
     } catch (error) { return { ...result, issue: error.message }; }
-  });
-}
-
-export function parseFalPricing(data) {
-  if (!Array.isArray(data?.prices)) throw new Error("Fal did not return a pricing table.");
-  return falPricingEndpoints.map((endpoint) => {
-    const rows = data.prices.filter((item) => item.endpoint_id === endpoint);
-    const result = { id: `fal:${endpoint}`, label: endpoint, source: FAL_PRICING_URL };
-    if (rows.length !== 1) return { ...result, issue: "Price unavailable or ambiguous. Existing estimate retained." };
-    const price = rows[0];
-    if (price.currency !== "USD" || typeof price.unit_price !== "number" || !Number.isFinite(price.unit_price) || price.unit_price < 0)
-      return { ...result, issue: "Unsupported currency or price. Existing estimate retained." };
-    const observed = { unit: price.unit, amount: price.unit_price, currency: price.currency };
-    const fixed = falFixedPricing[endpoint];
-    if (!fixed || fixed.unit !== price.unit) return { ...result, observed, issue: "Unit price checked; this model's variable billing rules require review before automatic updates." };
-    return { ...result, observed, entry: { currency: "USD", unit: fixed.unit, source: FAL_PRICING_URL,
-      points: [{ amount: price.unit_price, dimensions: {} }] } };
   });
 }
 

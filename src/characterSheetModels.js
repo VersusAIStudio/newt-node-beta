@@ -18,7 +18,7 @@ export function normalizeCharacterSheetModel(value) {
 export function characterSheetGenerationSettings(value, provider = "fal") {
   const model = normalizeCharacterSheetModel(value);
   if (isOpenAiImage25Model(model) && provider === "krea") {
-    throw new Error("GPT Image 2.5 Character sheets require Fal for 4K output and protected wardrobe edits. Enable Fal or choose Nano Banana 2, Nano Banana Pro, or Image 2 for Krea.");
+    throw new Error("GPT Image 2.5 Character sheets require Fal or Atlas for protected wardrobe edits; Krea does not accept edit masks. Enable Fal or Atlas, or choose Nano Banana 2, Nano Banana Pro, or Image 2 for Krea.");
   }
   return {
     model,

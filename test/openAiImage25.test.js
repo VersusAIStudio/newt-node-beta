@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import * as image25 from "../src/openAiImage25.js";
+import * as modelOptions from "../src/modelOptions.js";
 import { imageModelNames, imageModelOptions, normalizeModelPreferences, openAiImageAspectRatios } from "../src/modelOptions.js";
 import { normalizeOpenAiImage2Quality } from "../src/openAiImage2.js";
 import { buildKreaImageInput, kreaEndpointForModel, supportsKreaModel, normalizeKreaImageResolution } from "../src/kreaApi.js";
 import { estimateImageRunCost } from "../src/generationPricing.js";
 import { reserveMyNewtCost } from "../server/my-newt-budget.js";
-import { falPricingEndpoints, kreaPricingModels } from "../server/pricing-sources.js";
+import { kreaPricingModels } from "../server/pricing-sources.js";
 import { nodeApi } from "../src/api/newtApi.js";
 import { runImageModelGeneration } from "../src/nodeRunners/mediaModels.js";
 import sharp from "sharp";
@@ -133,17 +134,20 @@ test("Fal rejects mismatched wardrobe masks before uploading or submitting eithe
   }
 });
 
-test("Krea sends only supported launch fields with 10 references intact", () => {
+test("Krea sends all nine current aspect ratios at 1K/2K/4K with 10 references intact", () => {
+  assert.deepEqual(image25.openAiImage25KreaAspectRatios, ["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"]);
+  assert.deepEqual(image25.openAiImage25KreaResolutionOptions, ["1K", "2K", "4K"]);
   const referenceUrls = Array.from({ length: 10 }, (_, i) => `https://example.com/${i}.png`);
   for (const modelName of models) {
     const variant = image25.openAiImage25Variant(modelName);
     assert.equal(kreaEndpointForModel("image", modelName), `/generate/image/openai/gpt-image-2.5-${variant}`);
-    for (const aspectRatio of image25.openAiImage25KreaAspectRatios) {
-      const input = buildKreaImageInput({ modelName, prompt, referenceUrls, aspectRatio, resolution: "1K", quality: "max" });
-      assert.deepEqual(input, { prompt, image_urls: referenceUrls, aspect_ratio: aspectRatio, resolution: "1K", quality: "max", ...(variant === "flare" ? { background: "auto" } : {}) });
+    for (const aspectRatio of image25.openAiImage25KreaAspectRatios) for (const resolution of image25.openAiImage25KreaResolutionOptions) {
+      const input = buildKreaImageInput({ modelName, prompt, referenceUrls, aspectRatio, resolution, quality: "max" });
+      assert.deepEqual(input, { prompt, image_urls: referenceUrls, aspect_ratio: aspectRatio, resolution, quality: "max", ...(variant === "flare" ? { background: "auto" } : {}) });
+      assert.equal(normalizeKreaImageResolution(modelName, resolution), resolution);
     }
     const base = { model: modelName, resolution: "1K", aspectRatio: "1:1" };
-    for (const invalid of [{ resolution: "4K" }, { aspectRatio: "16:9" }, { referenceCount: 11 }, { editMaskDataUrl: "mask" }]) {
+    for (const invalid of [{ resolution: "8K" }, { aspectRatio: "21:9" }, { referenceCount: 11 }, { editMaskDataUrl: "mask" }]) {
       assert.throws(() => image25.validateOpenAiImage25KreaRequest({ ...base, ...invalid }), { status: 400 });
     }
   }
@@ -153,9 +157,48 @@ test("Krea sends only supported launch fields with 10 references intact", () => 
 
 test("Krea selection normalizes sizes and unsupported backgrounds without reducing quality", () => {
   assert.deepEqual(image25.openAiImage25KreaSelection({ model: models[0], aspectRatio: "9:16", resolution: "4K", quality: "max", background: "transparent" }),
-    { aspectRatio: "2:3", resolution: "1K", quality: "max", background: "auto" });
+    { aspectRatio: "9:16", resolution: "4K", quality: "max", background: "auto" });
   assert.equal(image25.openAiImage25KreaSelection({ aspectRatio: "Auto" }).aspectRatio, "Auto");
-  assert.equal(image25.openAiImage25KreaSelection({ aspectRatio: "21:9" }).aspectRatio, "3:2");
+  assert.equal(image25.openAiImage25KreaSelection({ aspectRatio: "21:9" }).aspectRatio, "2:1");
+  for (const aspectRatio of image25.openAiImage25KreaAspectRatios) for (const resolution of image25.openAiImage25KreaResolutionOptions) {
+    const selection = image25.openAiImage25KreaSelection({ aspectRatio, resolution, quality: "medium" });
+    assert.equal(selection.aspectRatio, aspectRatio); assert.equal(selection.resolution, resolution); assert.equal(selection.quality, "medium");
+  }
+});
+
+test("Image workspace and node controls share current Krea formats and preserve them on reload", async () => {
+  const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
+  const workspace = await readFile(new URL("../src/main.jsx", import.meta.url), "utf8");
+  const deps = { ...modelOptions, ...image25, isNanoBanana2Model: () => false };
+  const functions = (source, names, extra = {}) => {
+    const scope = { ...deps, ...extra };
+    const code = names.map(name => {
+      const start = source.indexOf(`function ${name}(`);
+      assert.ok(start >= 0, name);
+      return source.slice(start, source.indexOf("\n}", start) + 2);
+    }).join("\n");
+    return new Function(...Object.keys(scope), `${code}\nreturn {${names.join(",")}};`)(...Object.values(scope));
+  };
+  const nodes = functions(editor, ["imageModelAspectRatioOptions", "imageModelSupportedAspectRatios", "imageModelResolutionOptions", "isOpenAiImageModel", "normalizeImageModelAspectRatio", "isAutoImageAspectRatio", "extractAspectRatio"]);
+  const image = functions(workspace, ["imageResolutionOptionsForModel", "imageAspectRatiosForModel"]);
+  for (const model of models) {
+    assert.deepEqual(nodes.imageModelAspectRatioOptions(model, "krea"), ["Auto", ...image25.openAiImage25KreaAspectRatios]);
+    assert.deepEqual(nodes.imageModelResolutionOptions(model, "krea"), ["1K", "2K", "4K"]);
+    assert.deepEqual(image.imageResolutionOptionsForModel(model, "krea"), ["1K", "2K", "4K"]);
+    for (const ratio of image25.openAiImage25KreaAspectRatios) {
+      assert.equal(nodes.normalizeImageModelAspectRatio(ratio, model), ratio);
+      assert.ok(image.imageAspectRatiosForModel(model).includes(ratio));
+    }
+  }
+  const storyboardOptions = new Function("openAiImage25KreaAspectRatios", `${editor.match(/const storyboardAspectRatioOptions = .*;/)[0]} return storyboardAspectRatioOptions;`)(image25.openAiImage25KreaAspectRatios);
+  const serverBoardOptions = new Function(`${server.match(/const storyboardAspectRatioOptions = .*;/)[0]} return storyboardAspectRatioOptions;`)();
+  for (const ratio of image25.openAiImage25KreaAspectRatios) {
+    assert.ok(storyboardOptions.includes(ratio)); assert.ok(serverBoardOptions.includes(ratio));
+  }
+  const explore = editor.slice(editor.indexOf('if (node.type === "explore") {'), editor.indexOf('if (node.type === "explore") {') + 1600);
+  assert.match(explore, /ratios=\{imageModelAspectRatioOptions\(node.data.model, generationProvider\)/);
+  assert.match(explore, /resolutions=\{imageModelResolutionOptions\(node.data.model, generationProvider\)/);
+  assert.match(workspace, /imageProvider === "krea" && isOpenAiImage25Model\(imageModel\) \? openAiImage25KreaAspectRatios/);
 });
 
 test("Krea transport records the variant and adapts Auto, rejecting invalid requests before upload", async () => {
@@ -172,17 +215,21 @@ test("Krea transport records the variant and adapts Auto, rejecting invalid requ
   for (const model of models) {
     const selectedModel = { displayName: model };
     const options = { prompt, selectedModel, imagePromptUrls: ["/uploads/base.png"], imagePromptLabels: ["@Park"], cleanReferenceLabels: ["@Park"], aspectRatio: "16:9", requestedAspectRatio: "Auto" };
-    const req = { body: { model, resolution: "1K", aspectRatio: "16:9", requestedAspectRatio: "Auto", quality: "max" } };
+    const req = { body: { model, resolution: "4K", aspectRatio: "16:9", requestedAspectRatio: "Auto", quality: "max" } };
     const result = await runKreaImageModel(req, { json: (value) => value }, options);
     assert.equal(result.image.localUrl, "/outputs/full.png");
     assert.equal(result.cost.amountUsd, null);
     assert.equal(history.at(-1).modelName, model);
     assert.equal(history.at(-1).settings.quality, "max");
-    assert.equal(calls.at(-1).input.aspect_ratio, "3:2");
+    assert.equal(calls.at(-1).input.aspect_ratio, "16:9");
+    assert.equal(calls.at(-1).input.resolution, "4K");
+    assert.equal(history.at(-1).settings.resolution, "4K");
     assert.match(calls.at(-1).input.prompt, /@Park/);
+    await runKreaImageModel(req, { json: value => value }, { ...options, requestedAspectRatio: "16:9" });
+    assert.equal(calls.at(-1).input.aspect_ratio, "16:9");
     const before = [calls.length, uploads.length];
-    await assert.rejects(runKreaImageModel({ body: { ...req.body, resolution: "4K" } }, {}, options), /1K/);
-    await assert.rejects(runKreaImageModel(req, {}, { ...options, requestedAspectRatio: "16:9" }), /1K/);
+    await assert.rejects(runKreaImageModel({ body: { ...req.body, resolution: "8K" } }, {}, options), /1K/);
+    await assert.rejects(runKreaImageModel(req, {}, { ...options, aspectRatio: "21:9", requestedAspectRatio: "21:9" }), /supported format/);
     await assert.rejects(runKreaImageModel({ body: { ...req.body, editMaskDataUrl: "mask" } }, {}, options), /masks/);
     assert.deepEqual([calls.length, uploads.length], before);
   }
@@ -197,7 +244,6 @@ test("2.5 pricing is unknown, never legacy Image 2 pricing or a free Newt run", 
   }
   assert.ok(estimateImageRunCost({ model: "OpenAI Image 2" }) > 0);
   for (const variant of ["sunburst", "flare"]) {
-    assert.ok(falPricingEndpoints.includes(`openai/gpt-image-2.5/${variant}/edit`));
     assert.ok(kreaPricingModels.some(([endpoint]) => endpoint.endsWith(`gpt-image-2.5-${variant}`)));
   }
 });

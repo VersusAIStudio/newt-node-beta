@@ -54,6 +54,7 @@ const notifyingNodeTypes = new Set([
   "audioModel",
   "autoAspect",
   "coverage",
+  "explore",
   "utility",
   "storyboard",
   "character",

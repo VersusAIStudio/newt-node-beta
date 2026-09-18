@@ -1,4 +1,4 @@
-import { Check, Pause, Play, Plus, RefreshCw, Send, ShieldCheck, Square, Trash2, Undo2, Unlock, X } from "lucide-react";
+import { Check, Pause, Play, RefreshCw, Send, ShieldCheck, Square, Undo2, Unlock, X } from "lucide-react";
 import { NodeRow } from "./NodePorts.jsx";
 import { myNewtSettings } from "../myNewt/contract.js";
 import { myNewtIntelligenceLevels, myNewtReasoningModes } from "../myNewt/intelligence.js";
@@ -7,7 +7,6 @@ import { applyMyNewtVoiceTranscript } from "../myNewt/voiceCommands.js";
 import { useRef, useState } from "react";
 import { MyNewtVoiceButton } from "./MyNewtVoiceButton.jsx";
 import { MyNewtTaskDetails } from "./MyNewtTaskDetails.jsx";
-import { newtPresetDisplayName } from "../myNewt/presets.js";
 import { MyNewtRemoteSettings } from "./MyNewtRemoteSettings.jsx";
 import { imageModelOptions, videoModelOptions } from "../modelOptions.js";
 import { NewtSkillsEditor } from "./NewtSkillsEditor.jsx";
@@ -21,8 +20,7 @@ export function MyNewtNodeBody({ node, config, incoming, onUpdate, onConnectStar
     voiceDraft.current.note = next;
     onUpdate(node.id, { myNewtNote: next });
   };
-  const { job, error, busy, control, presets, projectId, projectName, history = [], selectTask, focusNode, localPreview, protectedNodes = [], releaseProtection } = controller || {};
-  const selectedPreset = presets?.items.find((item) => item.id === presets.selectedId);
+  const { job, error, busy, control, projectId, projectName, history = [], selectTask, focusNode, localPreview, protectedNodes = [], releaseProtection } = controller || {};
   const summary = job?.id === node.data.jobId && job?.nodeId === node.id ? job : node.data.myNewtSummary;
   const status = summary?.status || "ready";
   const terminal = !node.data.jobId || ["complete", "stopped"].includes(status);
@@ -46,20 +44,6 @@ export function MyNewtNodeBody({ node, config, incoming, onUpdate, onConnectStar
     }
   });
   return <div className="node-body my-newt-body">
-    {presets && <div className="my-newt-presets">
-      <label htmlFor={`${node.id}-preset`} title="Insert a saved workflow without LLM calls or automatic generation.">Preset Workflow</label>
-      <div className="my-newt-preset-controls">
-        <select id={`${node.id}-preset`} aria-label="Newt preset" value={presets.selectedId} disabled={presets.busy} onChange={(event) => presets.select(event.target.value)}>
-          <option value="">{presets.items.length ? "Select preset" : "No saved presets"}</option>
-          {presets.items.map((preset) => <option key={preset.id} value={preset.id}>{newtPresetDisplayName(preset)}</option>)}
-        </select>
-        <button className="my-newt-icon" title="Insert preset" aria-label="Insert Newt Preset" disabled={!presets.selectedId || presets.busy || busy || running} onClick={presets.insert}><Plus size={15} /></button>
-        <button className="my-newt-icon" title={selectedPreset?.isSystem ? "System presets cannot be deleted" : "Delete user preset"} aria-label="Delete Newt Preset" disabled={selectedPreset?.isSystem !== false || presets.busy} onClick={presets.remove}><Trash2 size={15} /></button>
-        {presets.error && <button className="my-newt-icon" title="Reload presets" aria-label="Reload Newt Presets" disabled={presets.busy} onClick={presets.refresh}><RefreshCw size={15} /></button>}
-      </div>
-      {(selectedPreset?.slots || []).map((slot) => <label className="my-newt-preset-binding" key={slot.nodeId}><span>{slot.label} ({slot.role})</span><select aria-label={`Preset input ${slot.label}`} disabled={presets.busy || running} value={presets.bindings[slot.nodeId] || ""} onChange={(event) => presets.bind(slot.nodeId, event.target.value)}><option value="">Saved asset</option>{presets.candidates.filter((item) => item.type === slot.type).map((item) => <option key={item.id} value={item.id}>{item.data?.characterName || item.data?.title || slot.role}</option>)}</select></label>)}
-      {presets.error && !presets.draft && <p className="my-newt-message error" role="alert">{presets.error}</p>}
-    </div>}
     {!!history.length && <label className="my-newt-history">Task history<select aria-label="Newt task history" value={node.data.jobId || ""} disabled={busy || !terminal} onChange={(event) => selectTask(event.target.value)}><option value="">New task</option>{history.map((item) => <option key={item.id} value={item.id}>{new Date(item.startedAt).toLocaleDateString()} - {item.brief.slice(0, 80)}</option>)}</select></label>}
     <div className="my-newt-brief"><textarea aria-label="Newt brief" placeholder="What would you like to create?" value={node.data.brief || ""} onChange={(event) => patch({ brief: event.target.value })} readOnly={!terminal} />{terminal && !job && !settings.localOnly && <MyNewtVoiceButton voice={voice} disabled={busy} />}</div>
     {terminal && !completedBrief && localPreview?.route === "blocked" && <p className="my-newt-message error" role="status">{localPreview.error}</p>}

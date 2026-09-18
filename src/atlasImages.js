@@ -1,15 +1,13 @@
-import { imageModelNames, nanoImageAspectRatios, reve21AspectRatios } from "./modelOptions.js";
+import { imageModelNames, nanoImageAspectRatios } from "./modelOptions.js";
 
 // Verified 2026-09-10 against https://static.atlascloud.ai/model/schema/<model-id-with-dashes>.json.
 // The 2.5 schemas also appear in https://www.atlascloud.ai/models/openai/gpt-image-2.5-sunburst/edit.
-// Atlas lists Krea 2 Turbo, not Newt's Krea 2 Large. Never substitute versions or developer tiers.
 const models = {
   [imageModelNames.openAiImage2]: { id: "openai/gpt-image-2", family: "openai", maxReferences: 10 },
   [imageModelNames.openAiImage25Sunburst]: { id: "openai/gpt-image-2.5-sunburst", family: "openai25", maxReferences: 16 },
   [imageModelNames.openAiImage25Flare]: { id: "openai/gpt-image-2.5-flare", family: "openai25", maxReferences: 16 },
   [imageModelNames.nanoBanana2]: { id: "google/nano-banana-2", family: "nano", maxReferences: 14, thinking: true },
-  [imageModelNames.nanoBananaPro]: { id: "google/nano-banana-pro", family: "nano", maxReferences: 10 },
-  [imageModelNames.reve21]: { id: "reve-ai/reve-2.1", family: "reve", maxReferences: 6 }
+  [imageModelNames.nanoBananaPro]: { id: "google/nano-banana-pro", family: "nano", maxReferences: 10 }
 };
 
 export const atlasImageModels = Object.freeze(Object.keys(models));
@@ -112,19 +110,17 @@ export function buildAtlasImageRequest(options = {}) {
   const image25 = config.family === "openai25";
   const openAi = image25 || config.family === "openai";
   validateReferences(images, config.maxReferences, model);
-  validatePrompt(prompt, image25 ? 32000 : config.family === "reve" ? (images.length ? 4000 : 2560) : null, model);
+  validatePrompt(prompt, image25 ? 32000 : null, model);
   if (typeof maskUrl !== "string" || (maskUrl && !maskUrl.trim())) fail(`Atlas ${model}: maskUrl must be an image string or empty.`);
   if (maskUrl && !image25) fail(`Atlas ${model} does not support masks.`);
   if (maskUrl && !images.length) fail("An Atlas edit mask needs a reference image.");
 
-  const defaultResolution = config.family === "reve" ? "4K" : "2K";
-  const selectedResolution = option(resolution === undefined ? defaultResolution : resolution,
-    config.family === "reve" ? ["4k"] : ["1k", "2k", "4k"], "resolution", model);
+  const selectedResolution = option(resolution === undefined ? "2K" : resolution, ["1k", "2k", "4k"], "resolution", model);
   const selectedQuality = option(quality, image25 ? ["auto", "low", "medium", "high", "xhigh", "max"]
     : openAi ? ["low", "medium", "high"] : ["high"], "quality", model);
   const selectedBackground = option(background, image25 ? ["auto", "opaque", "transparent"]
-    : config.family === "reve" ? ["auto", "transparent"] : ["auto"], "background", model);
-  const mode = config.family === "reve" && images.length > 1 ? "remix" : images.length ? "edit" : "text-to-image";
+    : ["auto"], "background", model);
+  const mode = images.length ? "edit" : "text-to-image";
   const request = {
     model: `${config.id}/${mode}`,
     prompt,
@@ -144,22 +140,13 @@ export function buildAtlasImageRequest(options = {}) {
     }
   } else {
     // The shared adapter supplies OpenAI dimensions for every model; these models use only their native controls.
-    request.aspect_ratio = option(aspectRatio, config.family === "reve" ? ["auto", ...reve21AspectRatios]
-      : nanoImageAspectRatios, "aspectRatio", model);
+    request.aspect_ratio = option(aspectRatio, nanoImageAspectRatios, "aspectRatio", model);
     request.resolution = selectedResolution;
     // These image models have no quality field. High is Newt's neutral default, not a provider tier.
-    if (config.family === "nano") {
-      request.media_resolution = "high";
-      if (config.thinking) request.thinking_level = "high";
-    } else {
-      // REVE transparency is explicit post-processing, not OpenAI's native background control.
-      request.remove_background = selectedBackground === "transparent";
-    }
+    request.media_resolution = "high";
+    if (config.thinking) request.thinking_level = "high";
   }
 
-  if (images.length) {
-    if (config.family === "reve" && images.length === 1) request.image = images[0];
-    else request.images = [...images];
-  }
+  if (images.length) request.images = [...images];
   return request;
 }

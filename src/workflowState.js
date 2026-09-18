@@ -78,6 +78,10 @@ export function dedupeEdges(edges) {
 export function clearStaleRunningState(node) {
   const original = node.data || {};
   let data = clearInterruptedMediaJob(original);
+  if (Array.isArray(original.exploreQueue)) {
+    data = { ...data, exploreAction: "", exploreStopRequested: false,
+      exploreQueue: original.exploreQueue.map(item => item.status === "running" ? { ...item, status: "uncertain", error: "Request interrupted. Check History and the provider before regenerating." } : item) };
+  }
   for (const field of ["storyboardFrames", "storyboardCharacters"]) {
     if (!Array.isArray(original[field])) continue;
     const items = original[field].map(clearInterruptedMediaJob);

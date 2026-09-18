@@ -46,12 +46,12 @@ test("Krea Seedance 2.5 pricing uses the current resolution and video-reference 
   assert.equal(withoutVideo.amountUsd, 7.281);
   assert.equal(withVideo.unitRateUsd, 0.1452);
   assert.equal(withVideo.amountUsd, 4.356);
-  assert.equal(withoutVideo.pricingSource, "krea-api-pricing-2026-08-29");
+  assert.equal(withoutVideo.pricingSource, "krea-api-pricing-2026-09-18");
 });
 
 test("Krea Seedance 2.5 pricing covers every supported resolution", () => {
   assert.equal(estimateKreaSeedanceCost({ modelName: "Seedance 2.5", resolution: "480p" }).unitRateUsd, 0.1078);
-  assert.equal(estimateKreaSeedanceCost({ modelName: "Seedance 2.5", resolution: "1080p", hasVideoReference: true }).unitRateUsd, 0.2572);
+  assert.equal(estimateKreaSeedanceCost({ modelName: "Seedance 2.5", resolution: "1080p", hasVideoReference: true }).unitRateUsd, 0.3572);
 });
 
 test("Krea result URLs normalize supported response shapes", () => {

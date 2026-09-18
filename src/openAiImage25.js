@@ -3,7 +3,9 @@ export const openAiImage25Models = Object.freeze({
   flare: "OpenAI Image 2.5 Flare"
 });
 export const openAiImage25QualityOptions = ["low", "medium", "high", "xhigh", "max"];
-export const openAiImage25KreaAspectRatios = ["1:1", "3:2", "2:3"];
+// Krea's published OpenAPI schema, verified 2026-09-18.
+export const openAiImage25KreaAspectRatios = ["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"];
+export const openAiImage25KreaResolutionOptions = ["1K", "2K", "4K"];
 export const openAiImage25BackgroundOptions = ["auto", "opaque", "transparent"];
 
 export function openAiImage25Variant(model) {
@@ -22,17 +24,20 @@ export function normalizeOpenAiImage25Background(value) {
 }
 
 export function openAiImage25KreaSelection(data = {}) {
-  const ratio = String(data.aspectRatio || "16:9").split(":").map(Number);
+  const [width, height] = String(data.aspectRatio || "16:9").split(":").map(Number);
+  const ratio = width > 0 && height > 0 ? width / height : 16 / 9;
+  const distance = value => { const [w, h] = value.split(":").map(Number); return Math.abs(Math.log(ratio / (w / h))); };
   const aspectRatio = data.aspectRatio === "Auto" ? "Auto" : openAiImage25KreaAspectRatios.includes(data.aspectRatio)
-    ? data.aspectRatio : ratio[0] > ratio[1] ? "3:2" : ratio[1] > ratio[0] ? "2:3" : "1:1";
-  return { resolution: "1K", aspectRatio, quality: normalizeOpenAiImage25Quality(data.quality),
+    ? data.aspectRatio : openAiImage25KreaAspectRatios.reduce((best, value) => distance(value) < distance(best) ? value : best);
+  const resolution = String(data.resolution || "2K").toUpperCase();
+  return { resolution: openAiImage25KreaResolutionOptions.includes(resolution) ? resolution : "2K", aspectRatio, quality: normalizeOpenAiImage25Quality(data.quality),
     background: openAiImage25Variant(data.model) === "sunburst" ? "auto" : normalizeOpenAiImage25Background(data.background) };
 }
 
 export function validateOpenAiImage25KreaRequest({ model, resolution, aspectRatio, referenceCount = 0, background, editMaskDataUrl } = {}) {
   const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
-  if (String(resolution || "1K").toUpperCase() !== "1K" || !openAiImage25KreaAspectRatios.includes(aspectRatio))
-    fail("Krea currently supports GPT Image 2.5 at 1K in 1:1, 3:2 or 2:3 only. Choose those settings or enable Fal for more sizes.");
+  if (!openAiImage25KreaResolutionOptions.includes(String(resolution || "2K").toUpperCase()) || !openAiImage25KreaAspectRatios.includes(aspectRatio))
+    fail(`Krea GPT Image 2.5 supports 1K, 2K or 4K in ${openAiImage25KreaAspectRatios.join(", ")}. Choose a supported format or enable Fal for other ratios.`);
   if (referenceCount > 10) fail("Krea GPT Image 2.5 accepts up to 10 reference images. Remove extra references before running.");
   if (editMaskDataUrl) fail("Krea GPT Image 2.5 does not currently accept edit masks. Enable Fal for a masked edit.");
   if (openAiImage25Variant(model) === "sunburst" && background && background !== "auto")

@@ -10,10 +10,11 @@ import { appendResultItems } from "../mediaResults.js";
 import { setOutputItemDragData, outputItemFromDataTransfer, hasOutputItemDragData, finishOutputItemDragData } from "../mediaAssets.js";
 import { notifyGenerationTaskComplete } from "../generationChime.js";
 import { normalizeEditorNodeWidth } from "../nodeGeometry.js";
+import { editorTimelineZoomDirection } from "../nodeKeyboardRouting.js";
 import { createEditorTimeline, normalizeEditorTimeline, editorEnd, editorRange, editorTimecode, editorImportMedia, editorAddTrack,
   editorSelection, editorMove, editorTrim, editorSplit, editorDelete, editorDuplicate, editorUnlink, editorSnap, editorSetFrameRate,
   editorFrameRates, editorId, clampEditor, editorRenderSignature, editorClipboardMime, editorCopyClips, editorPasteClips,
-  editorEditPoint, editorGapAt, editorRippleDeleteGap } from "../editorTimeline.js";
+  editorEditPoint, editorGapAt, editorRippleDeleteGap, normalizeEditorZoom, editorZoomStep } from "../editorTimeline.js";
 import "../editorTimeline.css";
 
 function Tool({ icon: Icon, label, active = false, ...props }) {
@@ -47,7 +48,8 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   const [gap, setGap] = React.useState(null), [gapMenu, setGapMenu] = React.useState(null);
   const [importing, setImporting] = React.useState(false), [retry, setRetry] = React.useState(0), [, setHistoryRevision] = React.useState(0);
   const [settings, setSettings] = React.useState(false), [monitor, setMonitor] = React.useState(false), [snap, setSnap] = React.useState(true), [linked, setLinked] = React.useState(true);
-  const [zoom, setZoom] = React.useState(Number(node.data.editorZoom) || 48), [progress, setProgress] = React.useState(0);
+  const [progress, setProgress] = React.useState(0);
+  const zoom = normalizeEditorZoom(node.data.editorZoom);
   const [choosingExport, setChoosingExport] = React.useState(false), [savedExportPath, setSavedExportPath] = React.useState("");
   const root = React.useRef(null), scroller = React.useRef(null), gesture = React.useRef(null), undo = React.useRef([]), redo = React.useRef([]);
   const importingRef = React.useRef(false), exportStarting = React.useRef(false), attempted = React.useRef(new Set()), mounted = React.useRef(false);
@@ -186,7 +188,7 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   function togglePlayback() { player.getSnapshot().playing ? player.pause() : player.play(); }
   function split() { perform(t => editorSplit(t, player.getSnapshot().frame, selection, linked)); }
   function remove() { perform(t => editorDelete(t, selection, linked)); setSelection([]); }
-  function changeZoom(next) { const value = clampEditor(next, 8, 400); setZoom(value); onUpdate(node.id, { editorZoom: value }); }
+  function changeZoom(next) { onUpdate(node.id, { editorZoom: normalizeEditorZoom(next) }); }
   function fit() { changeZoom((scroller.current?.clientWidth - 148 || 700) / Math.max(5, end / timeline.fps + 1)); }
   function copyClips(event, cut = false) {
     if (event.target.closest("input,textarea,select,[contenteditable='true']")) return;
@@ -246,12 +248,14 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
       width: normalizeEditorNodeWidth(latest.current.node.data.editorNodeWidth), changed: false };
   }
   function keyDown(event) {
-    if (event.isComposing || event.target.closest("input,textarea,select,[contenteditable='true']")) return;
+    if (event.defaultPrevented || event.isComposing || event.target.closest("input,textarea,select,[contenteditable='true']")) return;
     const key = event.key.toLowerCase(), command = event.metaKey || event.ctrlKey;
     if (command && ["c", "x", "v"].includes(key)) { event.stopPropagation(); return; }
     if (gesture.current && key !== "escape") { event.preventDefault(); event.stopPropagation(); return; }
+    const zoomDirection = editorTimelineZoomDirection(event);
     let action;
-    if (command && key === "z") action = () => history(!event.shiftKey);
+    if (zoomDirection) action = () => changeZoom(editorZoomStep(zoom, zoomDirection));
+    else if (command && key === "z") action = () => history(!event.shiftKey);
     else if (command && key === "y") action = () => history(false);
     else if (command && key === "b") action = split;
     else if (command && key === "d") action = () => perform(t => editorDuplicate(t, selection, linked));
@@ -270,10 +274,14 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
     };
     if (action) { event.preventDefault(); event.stopPropagation(); action(); }
   }
-  function focus(event) {
-    event.stopPropagation();
+  function handleBodyPointerDown(event) {
     if (!event.target.closest(".editor-gap-menu")) setGapMenu(null);
-    if (!event.target.closest("input,textarea,select,button,a")) root.current.focus({ preventScroll: true });
+    if (event.button !== 0 || event.target === scroller.current || event.target.closest("input,textarea,select,button,a,label,[contenteditable],.editor-ruler,.editor-track-lane,.editor-gap-menu")) {
+      event.stopPropagation();
+      return;
+    }
+    // Let the shared node drag handler select/move the node and retain canvas keyboard focus.
+    event.preventDefault();
   }
   function beginScrub(event) {
     if (event.button !== 0) return;
@@ -349,7 +357,7 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   }
   const portProps = { node, onConnectStart, onDisconnectInput, connectedPortKeys };
   return <div ref={root} className="node-body editor-node-body" tabIndex={0} data-editor-timeline="true" aria-label="Editor timeline"
-    onPointerDown={focus} onKeyDown={keyDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}
+    onPointerDown={handleBodyPointerDown} onKeyDown={keyDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}
     onCopy={event => copyClips(event)} onCut={event => copyClips(event, true)} onPaste={pasteClips}
     onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}
     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setGapMenu(null); }}
@@ -364,7 +372,7 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
           <Tool icon={Camera} label="Grab current frame as PNG" onClick={() => render(transport.frame)} disabled={!end || transport.frame >= end || exporting || choosingExport || importing} />
         </div>
         <div className="editor-readouts"><label>Frame<input aria-label="Timeline frame" type="number" min="0" max={end} value={transport.frame} onChange={event => player.seek(Number(event.target.value))} /></label>
-          <label>Timecode<output aria-label="Timeline timecode">{editorTimecode(transport.frame, timeline.fps)}</output></label></div>
+          <div className="editor-timecode"><span>Timecode</span><output aria-label="Timeline timecode">{editorTimecode(transport.frame, timeline.fps)}</output></div></div>
       </div>
       <div className="editor-output"><div><span>Output</span><PortHandle {...portProps} port={config.output[0]} side="output" /></div>
         <button className="editor-export" onClick={() => render()} disabled={!end || exporting || choosingExport || importing} aria-busy={exporting || choosingExport}>{exporting || choosingExport ? <Loader2 size={15} className="spin" /> : <Download size={15} />}<span>{choosingExport ? "Save..." : exporting ? `${Math.round(progress * 100)}%` : "Export"}</span></button></div>
@@ -376,14 +384,14 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
       <div className="editor-tool-group editor-range-controls"><Tool icon={ChevronFirst} label="Set In (I)" onClick={() => mark("in")} disabled={!end} /><output title="In point">{editorTimecode(range.start, timeline.fps)}</output>
         <Tool icon={ChevronLast} label="Set Out (O)" onClick={() => mark("out")} disabled={!end} /><output title="Out point (last included frame)">{editorTimecode(Math.max(0, range.end - 1), timeline.fps)}</output>
         <Tool icon={Brackets} label="Clear In and Out" onClick={() => perform(t => ({ ...t, inFrame: 0, outFrame: null }))} /></div>
-      <div className="editor-tool-group editor-view-tools"><Tool icon={ZoomOut} label="Zoom out timeline" onClick={() => changeZoom(zoom / 1.4)} /><Tool icon={Scan} label="Fit sequence" onClick={fit} /><Tool icon={ZoomIn} label="Zoom in timeline" onClick={() => changeZoom(zoom * 1.4)} />
+      <div className="editor-tool-group editor-view-tools"><Tool icon={ZoomOut} label="Zoom out timeline (-)" onClick={() => changeZoom(editorZoomStep(zoom, -1))} /><Tool icon={Scan} label="Fit sequence" onClick={fit} /><Tool icon={ZoomIn} label="Zoom in timeline (+ / =)" onClick={() => changeZoom(editorZoomStep(zoom, 1))} />
         <Tool icon={MonitorPlay} label="Show sequence monitor" active={monitor} onClick={() => setMonitor(v => !v)} /><Tool icon={Settings2} label="Sequence settings" active={settings} onClick={() => setSettings(v => !v)} /></div>
     </div>
     {settings && <div className="editor-settings"><label>Frame Rate<select aria-label="Sequence frame rate" value={timeline.fps} disabled={exporting} onChange={event => perform(t => editorSetFrameRate(t, Number(event.target.value)))}>{editorFrameRates.map(fps => <option key={fps} value={fps}>{fps} fps</option>)}</select></label>
       <label>Width<input aria-label="Sequence width" type="number" min="2" max="4096" step="2" value={timeline.width} onChange={event => perform(t => ({ ...t, width: Number(event.target.value) }))} /></label>
       <label>Height<input aria-label="Sequence height" type="number" min="2" max="4096" step="2" value={timeline.height} onChange={event => perform(t => ({ ...t, height: Number(event.target.value) }))} /></label>
       <span>MP4 / H.264 + AAC</span></div>}
-    {monitor && <EditorMonitor nodeId={node.id} timeline={timeline} />}
+    {monitor && <EditorMonitor nodeId={node.id} timeline={timeline} allowNodeDrag />}
     <div className="editor-scroll" ref={scroller}>
       <div className="editor-track-table" style={{ width: contentWidth + 148 }}>
         <div className="editor-ruler-row"><div className="editor-track-head editor-ruler-head"><span>{timeline.fps} fps</span></div>

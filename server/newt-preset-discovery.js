@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { myNewtSnapshot } from "../src/myNewt/contract.js";
 import { myNewtReadDetails } from "../src/myNewt/context.js";
+import { migrateRetiredGraph } from "../src/retiredNodes.js";
 
-const fields = ["model", "characterSheetModel", "stylePreset", "gradePreset", "shotPreset", "lensPreset", "typePreset", "aspectRatio", "resolution", "batchCount", "skillApproach", "skillVideoModel"];
+const fields = ["utilityMode", "utilityImageModel", "coverageMethod", "model", "characterSheetModel", "stylePreset", "gradePreset", "shotPreset", "lensPreset", "typePreset", "aspectRatio", "resolution", "batchCount", "skillApproach", "skillVideoModel"];
 const text = (value, max = 120) => String(value || "").slice(0, max);
 export const newtPresetRevision = preset => createHash("sha256").update(JSON.stringify({ name: preset.name, graph: preset.graph })).digest("hex");
 
 export function newtPresetSummary(preset, isSystem = preset.isSystem === true) {
-  const nodes = preset.graph.nodes || [];
+  const nodes = migrateRetiredGraph(preset.graph).nodes;
   return {
     id: preset.id, name: text(preset.name), createdAt: preset.createdAt, nodeCount: nodes.length,
     slots: preset.graph.slots || [], isSystem, revision: newtPresetRevision(preset),
@@ -31,7 +32,7 @@ export function newtPresetIndex(presets, brief = "", offset = 0) {
 }
 
 export function newtPresetDetails(preset, request = {}) {
-  const snapshot = myNewtSnapshot({ ...preset.graph });
+  const snapshot = myNewtSnapshot(migrateRetiredGraph(preset.graph));
   if (request.nodeIds?.length) {
     if (request.field && request.nodeIds.length !== 1) throw new Error("Read one preset node field at a time.");
     const details = myNewtReadDetails(snapshot, request);

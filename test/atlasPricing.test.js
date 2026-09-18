@@ -105,7 +105,7 @@ test("public adapter applies standard rows only, ignoring discounts, account quo
   model.pricing = { resolutions: [{ resolution: "480p", video: "0.038" }, { resolution: "4k", video: "0.08" }] };
   assert.ok(parsed(model).entry);
   assert.ok(!parsed(model).entry.points.some((point) => point.dimensions.resolution === "480p"));
-  assert.equal(results.find((row) => row.id === "atlas:reve-ai/reve-2.1/edit").entry, undefined);
+  assert.equal(results.find((row) => row.id === "atlas:reve-ai/reve-2.1/edit"), undefined);
 });
 
 test("adapter rejects changed rules, units, dimensions, missing tiers and unusual raw prices", () => {
@@ -151,7 +151,7 @@ test("shared catalog overrides bundled rates without revaluing recorded costs or
   }
 });
 
-test("weekly adapter uses existing persistence, no auth or paid requests, and survives errors/reload", async (t) => {
+test("daily adapter uses existing persistence, no auth or paid requests, and survives errors/reload", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-atlas-pricing-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = path.join(directory, "pricing.json");
@@ -171,11 +171,12 @@ test("weekly adapter uses existing persistence, no auth or paid requests, and su
   assert.ok(calls.every(({ init }) => (init.method || "GET") === "GET" && !init.headers.Authorization));
   const retained = service.catalog().entries[`atlas:${banana}`];
   changed = true; await service.refresh();
-  assert.deepEqual(service.catalog().entries[`atlas:${banana}`], retained);
+  assert.deepEqual(service.catalog().entries[`atlas:${banana}`].points, retained.points);
+  assert.ok(service.catalog().entries[`atlas:${banana}`].invalidatedAt);
   assert.ok(service.status().sources.atlas.reviews.some((row) => /2x/.test(row.message)));
   fail = true; await service.refresh();
   assert.equal(service.status().sources.atlas.status, "error");
-  assert.deepEqual(service.catalog().entries[`atlas:${banana}`], retained);
+  assert.deepEqual(service.catalog().entries[`atlas:${banana}`].points, retained.points);
   const restored = new PricingRefresh({ filePath, enableAtlasPricing: true, fetchImpl });
   await restored.ready;
   assert.deepEqual(restored.catalog().entries, service.catalog().entries);

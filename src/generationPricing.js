@@ -1,16 +1,16 @@
-import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost } from "./kreaApi.js";
+import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost, kreaEndpointForModel } from "./kreaApi.js";
 import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { estimateMiniMaxH3FalCost } from "./minimaxH3.js";
 import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
 import { isOpenAiImage25Model } from "./openAiImage25.js";
-import { estimateReve21ImageCost, reve21EndpointForReferenceCount } from "./reve21.js";
 import { estimateSeedance25FalCost } from "./seedance25.js";
 import { estimateAtlasImageCost, estimateAtlasVideoCost } from "./atlasPricing.js";
+import { getGenerationQuote, getPricingCatalog } from "./pricingCatalog.js";
+import { generationQuoteSettings, priceState } from "./pricingTrust.js";
 
 const falImageRates = Object.freeze({
-  "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
-  "Krea 2 Large": Object.freeze({ standard: 0.06, reference: 0.065 })
+  "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 })
 });
 
 const falKlingRates = Object.freeze({
@@ -61,6 +61,8 @@ export function estimateImageRunCost({
   batchCount = 1,
   provider = "fal"
 } = {}) {
+  const quote = getGenerationQuote({ kind: "image", model, resolution, aspectRatio, quality, referenceCount, batchCount, provider });
+  if (quote) return quote.amountUsd;
   if (provider === "atlas") return totalEstimate(estimateAtlasImageCost({ model, resolution, aspectRatio, quality, referenceCount }).amountUsd, batchCount);
   const normalizedProvider = provider === "krea" ? "krea" : "fal";
   const references = Math.max(0, Number(referenceCount) || 0);
@@ -69,7 +71,9 @@ export function estimateImageRunCost({
   if (isOpenAiImage25Model(model)) return null;
 
   if (model === "OpenAI Image 2") {
-    unitCost = estimateOpenAiImage2Cost({
+    unitCost = normalizedProvider === "krea"
+      ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd
+      : estimateOpenAiImage2Cost({
       resolution,
       size: orientationSize(aspectRatio),
       quality,
@@ -83,12 +87,6 @@ export function estimateImageRunCost({
     unitCost = normalizedProvider === "krea"
       ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd
       : falImageRates[model][normalizedImageResolution(resolution)];
-  } else if (model === "REVE 2.1") {
-    unitCost = estimateReve21ImageCost({ endpoint: reve21EndpointForReferenceCount(references) }).amountUsd;
-  } else if (model === "Krea 2 Large") {
-    unitCost = normalizedProvider === "krea"
-      ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd
-      : references > 0 ? falImageRates[model].reference : falImageRates[model].standard;
   }
 
   return totalEstimate(unitCost, batchCount);
@@ -102,10 +100,15 @@ export function estimateVideoRunCost({
   generateAudio = true,
   hasVideoReference = false,
   referenceImageCount = 0,
+  startFrameCount = 0,
+  endFrameCount = 0,
+  audioReferenceCount = 0,
   batchCount = 1,
   provider = "fal"
 } = {}) {
-  if (provider === "atlas") return totalEstimate(estimateAtlasVideoCost({ model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount }).amountUsd, batchCount);
+  const quote = getGenerationQuote({ kind: "video", model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount, startFrameCount, endFrameCount, audioReferenceCount, batchCount, provider });
+  if (quote) return quote.amountUsd;
+  if (provider === "atlas") return totalEstimate(estimateAtlasVideoCost({ model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount, startFrameCount, ...(audioReferenceCount ? { refers: true } : {}) }).amountUsd, batchCount);
   const normalizedProvider = provider === "krea" ? "krea" : "fal";
   const seconds = durationSeconds(duration, model === "Seedance 2.5" ? 15 : 5);
   let unitCost = null;
@@ -142,7 +145,22 @@ export function formatRunCost(amountUsd) {
 
 export function formatPricedRunLabel(label, amountUsd) {
   const cost = formatRunCost(amountUsd);
-  return cost ? `${label} (${cost})` : label;
+  return cost ? `${label} (Est. ${cost})` : `${label} (Variable cost)`;
+}
+
+export function generationEstimate(raw) {
+  const options = generationQuoteSettings(raw);
+  const cached = getGenerationQuote(options);
+  if (cached) return cached;
+  const amountUsd = (options.kind === "video" ? estimateVideoRunCost : estimateImageRunCost)(options);
+  let endpoint = "";
+  if (options.provider === "krea") endpoint = kreaEndpointForModel(options.kind, options.model);
+  if (options.provider === "atlas") endpoint = (options.kind === "video" ? estimateAtlasVideoCost : estimateAtlasImageCost)(options).endpoint;
+  const entry = getPricingCatalog()?.entries?.[`${options.provider}:${endpoint}`];
+  const state = entry ? priceState(entry) : "bundled";
+  return { amountUsd, currency: "USD", estimated: true, pricingCheckedAt: entry?.checkedAt,
+    pricingStatus: amountUsd == null ? "unavailable" : state === "current" ? "estimated" : state,
+    pricingBasis: entry ? "Published estimate for these billing settings; not a settled charge." : "Bundled estimate; not an account quote or final charge." };
 }
 
 function estimateSeedance20FalCost({ duration, resolution, aspectRatio, hasVideoReference }) {

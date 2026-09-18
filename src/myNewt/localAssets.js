@@ -1,4 +1,5 @@
 import { cleanReferenceTag } from "../referenceTags.js";
+import { isCoverageNode } from "../coveragePresets.js";
 
 export const normalizeLocalName = (value) => String(value || "").trim().toLowerCase();
 export function localNamedNode(snapshot, name) {
@@ -14,8 +15,8 @@ export function localNamedNode(snapshot, name) {
 export function localAttachedNodes(snapshot, kind = "assets") {
   const newt = snapshot.nodes?.find((node) => node.type === "myNewt");
   const ids = new Set((snapshot.edges || []).filter((edge) => edge.to.nodeId === newt?.id).map((edge) => edge.from.nodeId));
-  const types = { images: ["image", "imageModel", "coverage", "storyboard", "composer"], videos: ["video", "videoModel"], characters: ["character"], "mood boards": ["transfer"], audio: ["audio"] };
-  return (snapshot.nodes || []).filter((node) => ids.has(node.id) && (kind === "assets" || types[kind]?.includes(node.type)));
+  const types = { images: ["image", "imageModel", "storyboard"], videos: ["video", "videoModel"], characters: ["character"], "mood boards": ["transfer"], audio: ["audio"] };
+  return (snapshot.nodes || []).filter((node) => ids.has(node.id) && (kind === "assets" || types[kind]?.includes(node.type) || (kind === "images" && isCoverageNode(node))));
 }
 
 const defaultRole = (node) => node.type === "character" ? "character" : node.type === "transfer" ? "mood board" : ["video", "videoModel"].includes(node.type) ? "video" : node.type === "audio" ? "audio" : "image";

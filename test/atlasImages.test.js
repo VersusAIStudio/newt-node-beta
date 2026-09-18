@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { atlasImageModels, buildAtlasImageRequest, supportsAtlasImageModel } from "../src/atlasImages.js";
-import { imageModelNames, imageModelOptions, nanoImageAspectRatios, reve21AspectRatios } from "../src/modelOptions.js";
+import { imageModelNames, imageModelOptions, nanoImageAspectRatios } from "../src/modelOptions.js";
 
 const prompt = "Preserve the product and change the lighting.";
 const maskUrl = "https://example.com/mask.png";
@@ -18,10 +18,8 @@ const contracts = [
   [imageModelNames.openAiImage25Flare, "openai/gpt-image-2.5-flare", 16],
   [imageModelNames.nanoBanana2, "google/nano-banana-2", 14],
   [imageModelNames.nanoBananaPro, "google/nano-banana-pro", 10],
-  [imageModelNames.reve21, "reve-ai/reve-2.1", 6]
 ];
-const settings = (model, overrides = {}) => ({ model, prompt,
-  ...(model === imageModelNames.reve21 ? { resolution: "4K" } : {}), ...overrides });
+const settings = (model, overrides = {}) => ({ model, prompt, ...overrides });
 function rejects(options, pattern) {
   assert.throws(() => buildAtlasImageRequest(options), (error) => {
     assert.equal(error.status, 400);
@@ -31,7 +29,7 @@ function rejects(options, pattern) {
 }
 
 test("only exact canonical image models are supported, with no substitutions or LLMs", () => {
-  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions.filter((name) => name !== imageModelNames.krea2Large)));
+  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions));
   assert.ok(Object.isFrozen(atlasImageModels));
   for (const model of atlasImageModels) assert.equal(supportsAtlasImageModel(model), true);
   for (const model of [undefined, null, {}, 2, "", "toString", "__proto__", "OpenAI Image 2.5", "OpenAI Image 2.5 Sunburst Developer",
@@ -48,7 +46,7 @@ for (const [model, id, limit] of contracts) {
     for (const count of [0, 1, 2, limit]) {
       const images = references(count);
       const result = buildAtlasImageRequest(settings(model, { images }));
-      const mode = model === imageModelNames.reve21 && count > 1 ? "remix" : count ? "edit" : "text-to-image";
+      const mode = count ? "edit" : "text-to-image";
       assert.equal(result.model, `${id}/${mode}`);
       assert.equal(result.prompt, prompt);
       assert.equal(result.output_format, "png");
@@ -57,10 +55,7 @@ for (const [model, id, limit] of contracts) {
       assert.equal("endpoint" in result, false);
       assert.equal("image_urls" in result, false);
       assert.equal("image_url" in result, false);
-      if (model === imageModelNames.reve21 && count === 1) {
-        assert.equal(result.image, images[0]);
-        assert.equal("images" in result, false);
-      } else if (count) {
+      if (count) {
         assert.deepEqual(result.images, images);
         assert.notEqual(result.images, images);
         assert.equal("image" in result, false);
@@ -182,7 +177,6 @@ test("automatic sizing is only sent to models that explicitly support it", () =>
   rejects({ model: imageModelNames.openAiImage2, prompt, size: "auto" }, /size/);
   rejects({ model: imageModelNames.openAiImage2, prompt, aspectRatio: "Auto" }, /aspectRatio/);
   for (const model of nanoModels) rejects({ model, prompt, aspectRatio: "Auto" }, /aspectRatio/);
-  assert.equal(buildAtlasImageRequest(settings(imageModelNames.reve21, { aspectRatio: "Auto" })).aspect_ratio, "auto");
 });
 
 test("Nano Banana image models use standard routes and schema-supported high media/reasoning", () => {
@@ -209,28 +203,8 @@ test("Nano Banana image models use standard routes and schema-supported high med
   }
 });
 
-test("REVE defaults only omitted resolution to 4K and uses its distinct background-removal field", () => {
-  const model = imageModelNames.reve21;
-  assert.equal(buildAtlasImageRequest({ model, prompt }).resolution, "4k");
-  assert.equal(buildAtlasImageRequest({ model, prompt, resolution: undefined }).resolution, "4k");
-  for (const resolution of ["1K", "2K"]) rejects({ model, prompt, resolution }, /resolution.*4k/);
-  for (const images of [[], references(1), references(6)]) for (const aspectRatio of reve21AspectRatios) {
-    const result = buildAtlasImageRequest({ model, prompt, images, aspectRatio, resolution: "4K", background: "transparent" });
-    assert.equal(result.resolution, "4k");
-    assert.equal(result.aspect_ratio, aspectRatio);
-    assert.equal(result.remove_background, true);
-    assert.equal("background" in result, false);
-    assert.equal("quality" in result, false);
-    assert.equal("size" in result, false);
-  }
-  assert.equal(buildAtlasImageRequest(settings(model)).remove_background, false);
-  rejects(settings(model, { background: "opaque" }), /background/);
-  assert.deepEqual(buildAtlasImageRequest(settings(model, { size: "3840x2160" })), buildAtlasImageRequest(settings(model)));
-  rejects(settings(model, { quality: "max" }), /quality/);
-});
-
-test("shared OpenAI size is ignored for Nano/REVE without overriding native settings", () => {
-  for (const model of [...nanoModels, imageModelNames.reve21]) {
+test("shared OpenAI size is ignored for Nano Banana without overriding native settings", () => {
+  for (const model of nanoModels) {
     for (const images of [[], references(1), references(2)]) {
       const options = settings(model, { images, aspectRatio: "9:16" });
       const expected = buildAtlasImageRequest(options);
@@ -243,7 +217,6 @@ test("shared OpenAI size is ignored for Nano/REVE without overriding native sett
       rejects({ ...options, size: "3840x2160", maskUrl }, /does not support masks/);
     }
   }
-  rejects({ model: imageModelNames.reve21, prompt, resolution: "2K", size: "3840x2160" }, /resolution.*4k/);
 });
 
 test("Sunburst Character 4K landscape preserves base/wardrobe order and mask across preflight and native requests", (t) => {
@@ -278,10 +251,9 @@ test("invalid preflight settings reject before mocked uploads or submission", (t
   assert.equal(submit.mock.callCount(), 0);
 });
 
-test("documented prompt limits differ between REVE generation, edit/remix and OpenAI 2.5", () => {
+test("OpenAI 2.5 prompt limits apply to generation and edits", () => {
   for (const [model, images, limit] of [
     ...variants.flatMap((model) => [[model, [], 32000], [model, references(1), 32000]]),
-    [imageModelNames.reve21, [], 2560], [imageModelNames.reve21, references(1), 4000], [imageModelNames.reve21, references(6), 4000]
   ]) {
     assert.equal(buildAtlasImageRequest(settings(model, { images, prompt: "a".repeat(limit) })).prompt.length, limit);
     rejects(settings(model, { images, prompt: "a".repeat(limit + 1) }), new RegExp(`prompt.*${limit}`));

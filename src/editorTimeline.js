@@ -5,6 +5,15 @@ export const clampEditor = (value, min, max) => Math.min(max, Math.max(min, valu
 export const editorId = () => crypto.randomUUID();
 const safeId = (value) => String(value || "").slice(0, 160);
 
+export function normalizeEditorZoom(value) {
+  const zoom = Number(value);
+  return clampEditor(Number.isFinite(zoom) && zoom > 0 ? zoom : 48, 8, 400);
+}
+
+export function editorZoomStep(value, direction) {
+  return normalizeEditorZoom(normalizeEditorZoom(value) * (direction > 0 ? 1.4 : 1 / 1.4));
+}
+
 export function createEditorTimeline() {
   return { version: 1, fps: 24, width: 1920, height: 1080, inFrame: 0, outFrame: null, assets: [], clips: [], imports: [],
     tracks: [{ id: "v2", kind: "video", name: "V2" }, { id: "v1", kind: "video", name: "V1" },

@@ -4,9 +4,9 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import express from "express";
-import { PricingRefresh, latestPricingSlot, nextPricingSlot } from "../server/pricing-refresh.js";
+import { PricingRefresh } from "../server/pricing-refresh.js";
 import { registerPricingRoutes } from "../server/routes/pricing.js";
-import { parseKreaPricing, parseFalPricing, parseOpenAiPricing, validatePricingEntry, googlePricingTables, falPricingEndpoints } from "../server/pricing-sources.js";
+import { parseKreaPricing, parseOpenAiPricing, validatePricingEntry, googlePricingTables } from "../server/pricing-sources.js";
 import { setPricingCatalog, pricingQuote, getPricingCatalog, currentOpenAiRates, recordedCostAmount } from "../src/pricingCatalog.js";
 import { estimateImageRunCost, estimateVideoRunCost } from "../src/generationPricing.js";
 import { myNewtModelRates, myNewtTokenCost, myNewtReasoningAllowance } from "../src/myNewt/intelligence.js";
@@ -24,16 +24,12 @@ const openai = `# Pricing\n\nPrices per 1M tokens.\n\n### Standard pricing data\
 async function fixture(t, options = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-pricing-"));
   const calls = [];
-  let now = Date.parse("2026-09-07T08:00:00Z"), amount = 1, fail = false, key = "test-account-key";
+  let now = Date.now() - 10000, amount = 1, fail = false, key = "test-account-key";
   const fetchImpl = async (url, init) => {
     calls.push({ url: String(url), method: init.method || "GET" });
     assert.equal(init.redirect, "error");
     if (fail) return new Response("<!doctype html>bad gateway", { status: 524 });
     if (String(url).includes("api.krea.ai")) return Response.json(krea(amount));
-    if (String(url).includes("api.fal.ai")) return Response.json({ prices: [
-      { endpoint_id: "reve/2.1/text-to-image", unit: "image", unit_price: 0.3, currency: "USD" },
-      { endpoint_id: "bytedance/seedance-2.5/reference-to-video", unit: "second", unit_price: 0.5, currency: "USD" }
-    ], has_more: false });
     if (String(url).includes("openai.com")) return new Response(openai);
     return new Response("<table><tr><th>Paid Tier</th></tr><tr><td>$2</td></tr></table>");
   };
@@ -43,14 +39,79 @@ async function fixture(t, options = {}) {
   return { service, calls, advance: (ms) => now += ms, amount: (value) => amount = value, fail: (value) => fail = value, key: (value) => key = value };
 }
 
-test("weekly schedule follows Eastern daylight saving and exact Monday boundary", () => {
-  for (const [before, expected] of [
-    ["2026-03-08T08:00:00Z", "2026-03-09T08:00:00Z"],
-    ["2026-11-01T08:00:00Z", "2026-11-02T09:00:00Z"],
-    ["2026-09-07T07:59:59Z", "2026-09-07T08:00:00Z"]
-  ]) assert.equal(new Date(nextPricingSlot(Date.parse(before))).toISOString(), new Date(expected).toISOString());
-  assert.equal(new Date(latestPricingSlot(Date.parse("2026-09-07T08:00:00Z"))).toISOString(), "2026-09-07T08:00:00.000Z");
-  assert.equal(new Date(nextPricingSlot(Date.parse("2026-09-07T08:00:00Z"))).toISOString(), "2026-09-14T08:00:00.000Z");
+test("new installs leave background refresh off but allow a manual check", async t => {
+  const f = await fixture(t);
+  assert.equal(f.service.status().enabled, false);
+  assert.equal(f.service.status().nextCheckAt, null);
+  f.service.start();
+  await f.service.tick(); await f.service.ensureFresh();
+  f.advance(8 * 86400000); await f.service.tick(); await f.service.ensureFresh();
+  assert.equal(f.calls.length, 0);
+  await f.service.refresh();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.service.status().enabled, false);
+  const saved = JSON.parse(await readFile(f.service.filePath, "utf8"));
+  assert.equal(saved.enabled, false);
+  assert.equal(saved.autoRefreshPreferenceVersion, 1);
+});
+
+test("upgrades disable auto refresh once and preserve the saved catalog and change history", async t => {
+  const f = await fixture(t); await f.service.refresh();
+  const legacy = { ...f.service.state, enabled: true, retryAt: new Date().toISOString(), retryCount: 2 };
+  delete legacy.autoRefreshPreferenceVersion;
+  await f.service.write(f.service.filePath, legacy, { mode: 0o600 });
+  const restored = new PricingRefresh({ filePath: f.service.filePath, fetchImpl: f.service.fetchImpl });
+  await restored.ready; await restored.tick(); await restored.ensureFresh();
+  assert.equal(f.calls.length, 2);
+  assert.equal(restored.status().enabled, false);
+  const saved = JSON.parse(await readFile(f.service.filePath, "utf8"));
+  assert.equal(saved.enabled, false); assert.equal(saved.autoRefreshPreferenceVersion, 1);
+  assert.equal(saved.retryAt, null); assert.equal(saved.retryCount, 0);
+  for (const field of ["entries", "sources", "changes", "revision", "lastCheckAt"])
+    assert.deepEqual(saved[field], legacy[field]);
+});
+
+test("explicit opt-in and opt-out remain saved after reload", async t => {
+  const f = await fixture(t); await f.service.refresh();
+  for (const enabled of [true, false]) {
+    await f.service.setEnabled(enabled);
+    const restored = new PricingRefresh({ filePath: f.service.filePath, fetchImpl: f.service.fetchImpl });
+    await restored.ready;
+    assert.equal(restored.status().enabled, enabled);
+    assert.equal(restored.state.autoRefreshPreferenceVersion, 1);
+    assert.deepEqual(restored.state.entries, f.service.state.entries);
+  }
+});
+
+test("a failed upgrade preference write still leaves background checks disabled", async t => {
+  const f = await fixture(t); await f.service.refresh();
+  const legacy = { ...f.service.state, enabled: true };
+  delete legacy.autoRefreshPreferenceVersion;
+  await f.service.write(f.service.filePath, legacy, { mode: 0o600 });
+  const restored = new PricingRefresh({ filePath: f.service.filePath, fetchImpl: f.service.fetchImpl,
+    write: async () => { throw new Error("disk full"); } });
+  await restored.ready; await restored.tick(); await restored.ensureFresh();
+  assert.equal(restored.status().enabled, false);
+  assert.match(restored.status().error, /preference could not be saved/);
+  assert.deepEqual(restored.state.entries, legacy.entries);
+  assert.equal(f.calls.length, 2);
+});
+
+test("freshness is daily rather than waiting for a weekly wall-clock slot", async t => {
+  const f = await fixture(t);
+  f.service.state.enabled = true;
+  await f.service.tick(); assert.equal(f.calls.length, 2);
+  f.advance(86400000 - 1); await f.service.tick(); assert.equal(f.calls.length, 2);
+  f.advance(1); await f.service.tick(); assert.equal(f.calls.length, 4);
+});
+
+test("disabled providers and unsupported Google monitoring make no requests", async t => {
+  const f = await fixture(t, { getEnabledProviders: () => ({ krea: true, google: true, fal: false, openai: false }) });
+  await f.service.refresh();
+  assert.equal(f.calls.length, 1); assert.match(f.calls[0].url, /krea/);
+  assert.equal(f.service.status().sources.fal.status, "disabled");
+  assert.equal(f.service.status().sources.google.status, "bundled");
+  assert.equal(f.service.status().sources.google.reviews.length, 0);
 });
 
 test("Krea parser preserves exact dimensions and rejects new billing meanings", () => {
@@ -84,17 +145,6 @@ test("OpenAI parser uses Standard only, never Batch/Flex or malformed columns", 
   assert.throws(() => parseOpenAiPricing("<html>Cloudflare error</html>"));
 });
 
-test("Fal never flattens a variable video price into a fixed price", () => {
-  const results = parseFalPricing({ prices: [
-    { endpoint_id: "reve/2.1/edit", unit_price: 0.3, currency: "USD", unit: "image" },
-    { endpoint_id: "bytedance/seedance-2.5/reference-to-video", unit_price: 0.5, currency: "USD", unit: "second" }
-  ] });
-  assert.ok(results.find((item) => item.id === "fal:reve/2.1/edit").entry);
-  assert.ok(results.find((item) => item.id.endsWith("seedance-2.5/reference-to-video")).issue);
-  assert.ok(falPricingEndpoints.length <= 50);
-  assert.equal(new Set(falPricingEndpoints).size, falPricingEndpoints.length);
-});
-
 test("Google monitor extracts tables without executing page scripts or interpreting HTML as prices", () => {
   assert.deepEqual(googlePricingTables("<script>throw new Error()</script><table><tr><th>Paid Tier</th><td>$2</td></tr></table>"), ["Paid Tier $2"]);
   assert.throws(() => googlePricingTables("<html>timeout</html>"));
@@ -114,43 +164,48 @@ test("refresh persists verified data, keeps secrets out of status, and updates e
   setPricingCatalog(status.catalog);
   assert.equal(estimateVideoRunCost({ model: "Seedance 2.5", duration: "5 seconds", resolution: "720p", provider: "krea", batchCount: 2 }), 2);
   assert.notEqual(estimateVideoRunCost({ model: "Seedance 2.5", duration: "6 seconds", resolution: "720p", provider: "krea" }), 1);
-  assert.equal(estimateImageRunCost({ model: "REVE 2.1", batchCount: 4 }), 1.2);
+  assert.equal(estimateImageRunCost({ model: "Nano Banana Pro", resolution: "2K", batchCount: 4 }), 0.6);
   assert.equal((await stat(service.filePath)).mode & 0o777, 0o600);
   const restored = new PricingRefresh({ filePath: service.filePath, getFalKey: () => "test-account-key" });
   await restored.ready;
   assert.deepEqual(restored.catalog().entries, status.catalog.entries);
 });
 
-test("partial failures and suspicious changes preserve last-known-good prices", async (t) => {
+test("changed billing invalidates future estimates without changing captured prices", async (t) => {
   const f = await fixture(t); await f.service.refresh();
   const first = f.service.catalog().entries[`krea:${kreaPath}`];
   f.advance(1000); f.amount(4); await f.service.refresh();
-  assert.deepEqual(f.service.catalog().entries[`krea:${kreaPath}`], first);
+  assert.deepEqual(f.service.catalog().entries[`krea:${kreaPath}`].points, first.points);
+  assert.ok(f.service.catalog().entries[`krea:${kreaPath}`].invalidatedAt);
+  assert.equal(pricingQuote("krea", kreaPath, points()[0].dimensions, 1, f.service.catalog()), null);
   assert.ok(f.service.status().sources.krea.reviews.some((review) => /2x/.test(review.message)));
   f.advance(1000); f.fail(true); await f.service.refresh();
-  assert.deepEqual(f.service.catalog().entries[`krea:${kreaPath}`], first);
+  assert.deepEqual(f.service.catalog().entries[`krea:${kreaPath}`].points, first.points);
+  assert.ok(f.service.catalog().entries[`krea:${kreaPath}`].verificationFailed);
   assert.equal(f.service.status().sources.krea.status, "error");
 });
 
-test("Fal key switches invalidate account-specific quotes immediately", async (t) => {
+test("Fal key switches invalidate quote caches without recurring catalog requests", async (t) => {
   const f = await fixture(t); await f.service.refresh();
-  assert.ok(f.service.catalog().entries["fal:reve/2.1/text-to-image"]);
+  const before = f.service.accounts();
   f.key("replacement-key");
-  assert.ok(!f.service.catalog().entries["fal:reve/2.1/text-to-image"]);
-  assert.equal(f.service.status().sources.fal.status, "unavailable");
+  assert.notEqual(f.service.accounts(), before);
+  assert.equal(f.service.status().sources.fal.status, "bundled");
   f.key(""); await f.service.refresh();
-  assert.equal(f.calls.filter((call) => call.url.includes("api.fal.ai")).length, 1);
+  assert.equal(f.service.status().sources.fal.status, "disabled");
+  assert.equal(f.calls.filter(call => call.url.includes("api.fal.ai")).length, 0);
 });
 
-test("manual and scheduled checks coalesce; missed weeks catch up once; disable persists", async (t) => {
+test("manual and daily checks coalesce; missed checks catch up once; disable persists", async (t) => {
   const f = await fixture(t);
+  f.service.state.enabled = true;
   const one = f.service.refresh(), two = f.service.refresh(); assert.equal(one, two); await one;
-  assert.equal(f.calls.length, 4);
-  await f.service.tick(); assert.equal(f.calls.length, 4);
-  f.advance(3 * 7 * 86400000); await f.service.tick(); assert.equal(f.calls.length, 8);
-  await f.service.setEnabled(false); f.advance(7 * 86400000); await f.service.tick(); assert.equal(f.calls.length, 8);
+  assert.equal(f.calls.length, 2);
+  await f.service.tick(); assert.equal(f.calls.length, 2);
+  f.advance(3 * 86400000); await f.service.tick(); assert.equal(f.calls.length, 4);
+  await f.service.setEnabled(false); f.advance(7 * 86400000); await f.service.tick(); assert.equal(f.calls.length, 4);
   assert.equal(JSON.parse(await readFile(f.service.filePath, "utf8")).enabled, false);
-  await f.service.refresh(); assert.equal(f.calls.length, 12);
+  await f.service.refresh(); assert.equal(f.calls.length, 6);
 });
 
 test("write failure cannot publish an unpersisted price change", async (t) => {
@@ -162,17 +217,19 @@ test("write failure cannot publish an unpersisted price change", async (t) => {
   assert.match(f.service.status().error, /retained/);
 });
 
-test("offline checks retry hourly three times, then wait for the next weekly slot", async (t) => {
+test("offline checks retry hourly three times, then wait for the next daily check", async (t) => {
   const f = await fixture(t); f.fail(true);
-  await f.service.tick(); assert.equal(f.calls.length, 4);
-  f.advance(3599999); await f.service.tick(); assert.equal(f.calls.length, 4);
-  f.advance(1); await f.service.tick(); assert.equal(f.calls.length, 8);
-  f.advance(3600000); await f.service.tick(); assert.equal(f.calls.length, 12);
-  f.advance(3600000); await f.service.tick(); assert.equal(f.calls.length, 16);
-  f.advance(3600000); await f.service.tick(); assert.equal(f.calls.length, 16);
+  f.service.state.enabled = true;
+  await f.service.tick(); assert.equal(f.calls.length, 2);
+  f.advance(3599999); await f.service.tick(); assert.equal(f.calls.length, 2);
+  f.advance(1); await f.service.tick(); assert.equal(f.calls.length, 4);
+  f.advance(3600000); await f.service.tick(); assert.equal(f.calls.length, 6);
+  f.advance(3600000); await f.service.tick(); assert.equal(f.calls.length, 8);
+  f.advance(3600000); await f.service.tick(); assert.equal(f.calls.length, 8);
+  await f.service.ensureFresh(); assert.equal(f.calls.length, 8);
   assert.equal(f.service.state.retryAt, null);
-  f.advance(7 * 86400000); f.fail(false); await f.service.tick();
-  assert.equal(f.calls.length, 20); assert.equal(f.service.state.retryCount, 0);
+  f.advance(86400000); f.fail(false); await f.service.tick();
+  assert.equal(f.calls.length, 10); assert.equal(f.service.state.retryCount, 0);
   assert.equal(f.service.status().sources.openai.status, "current");
 });
 
@@ -183,20 +240,7 @@ test("disabling during a refresh remains disabled after both writes complete", a
   await refresh; await disable;
   assert.equal(f.service.status().enabled, false);
   assert.equal(JSON.parse(await readFile(f.service.filePath, "utf8")).enabled, false);
-  f.advance(7 * 86400000); await f.service.tick(); assert.equal(f.calls.length, 4);
-});
-
-test("a Fal credential replaced during a refresh cannot publish the old account quotes", async (t) => {
-  const f = await fixture(t);
-  const fetchImpl = f.service.fetchImpl;
-  f.service.fetchImpl = async (...args) => {
-    const result = await fetchImpl(...args);
-    if (String(args[0]).includes("api.fal.ai")) f.key("replacement-key");
-    return result;
-  };
-  await f.service.refresh();
-  assert.ok(!f.service.catalog().entries["fal:reve/2.1/text-to-image"]);
-  assert.equal(f.service.status().sources.fal.status, "unavailable");
+  f.advance(7 * 86400000); await f.service.tick(); assert.equal(f.calls.length, 2);
 });
 
 test("malformed persisted metadata falls back to bundled prices without breaking Settings", async (t) => {
@@ -206,6 +250,7 @@ test("malformed persisted metadata falls back to bundled prices without breaking
     const restored = new PricingRefresh({ filePath: f.service.filePath });
     await restored.ready;
     assert.deepEqual(restored.catalog().entries, {});
+    assert.equal(restored.status().enabled, false);
     assert.match(restored.status().error, /Bundled estimates/);
   }
 });
@@ -251,4 +296,23 @@ test("local pricing routes reject foreign origins and require explicit local wri
   const response = await fetch(`${root}/api/pricing/settings`, { method: "POST", headers: { "X-Newt-Local": "1", "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) });
   assert.equal(response.status, 200); assert.equal((await response.json()).enabled, false);
   assert.equal((await fetch(`${root}/api/pricing`)).headers.get("cache-control"), "no-store");
+});
+
+test("manual checks return immediately and account quotes stay local and uncached", async t => {
+  let finish, quoteCalls = 0;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const pricing = { ready: Promise.resolve(), status: () => ({ running: true }), refresh: () => pending };
+  const quotes = { quote: async settings => { quoteCalls++; return { amountUsd: settings.batchCount * 0.1 }; } };
+  const app = express(); app.use(express.json()); registerPricingRoutes(app, pricing, quotes);
+  const server = await new Promise(resolve => { const running = app.listen(0, "127.0.0.1", () => resolve(running)); });
+  t.after(() => { finish(); return new Promise(resolve => server.close(resolve)); });
+  const root = `http://127.0.0.1:${server.address().port}/api/pricing`;
+  const headers = { "X-Newt-Local": "1", "Content-Type": "application/json" };
+  const refresh = await fetch(`${root}/refresh`, { method: "POST", headers, signal: AbortSignal.timeout(1000) });
+  assert.equal(refresh.status, 202); assert.equal((await refresh.json()).running, true);
+  assert.equal((await fetch(`${root}/quote`, { method: "POST", headers: { ...headers, Origin: "https://example.com" }, body: "{}" })).status, 403);
+  assert.equal(quoteCalls, 0);
+  const quote = await fetch(`${root}/quote`, { method: "POST", headers, body: JSON.stringify({ batchCount: 4 }) });
+  assert.equal(quote.status, 200); assert.equal(quote.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await quote.json(), { amountUsd: 0.4 }); assert.equal(quoteCalls, 1);
 });

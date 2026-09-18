@@ -1,4 +1,5 @@
 import { myNewtIntelligence } from "./intelligence.js";
+import { isCoverageNode } from "../coveragePresets.js";
 import { normalizeMyNewtFavoriteModels } from "./favoriteModels.js";
 
 export const MY_NEWT_MODEL = "gpt-6-astra";
@@ -19,7 +20,8 @@ export const myNewtFields = Object.freeze({
   character: ["characterName", "characterPhysicalDetails", "characterReferenceNotes", "characterSheetModel", "cinematicCharacterSheet", "cuVideoGeneration"],
   skillDirector: ["sceneName", "sceneOverview", "text", "skillShotCount", "skillDurationSeconds", "skillVideoModel", "skillResolution", "skillAspectRatio", "skillDirectorAudioMode", "skillApproach", "styleDirection", "motionBrief", "motionDirection", "shotListNotes", "skillDirectorRevisionNotes"],
   storyboard: ["sceneName", "sceneDescription", "storyboardNotes", "frameCount", "model", "resolution", "aspectRatio", "useStoryboardStyle", "useMoodBoard", "storyboardStylePreset"],
-  image: [], video: [], audio: [], transfer: [], composer: [], utility: [], editor: []
+  utility: ["utilityMode", "utilityImageModel", "model", "coverageMethod", "resolution", "quality"],
+  image: [], video: [], audio: [], transfer: [], editor: []
 });
 
 export function myNewtSettings(data = {}) {
@@ -56,6 +58,7 @@ export function validateMyNewtPatch(node, patch, settings, createdIds = []) {
   if (node.data?.locked) throw new Error("This node has locked content. Ask the user to unlock it first.");
   if (node.data?.status === "running") throw new Error("Wait for this node to finish before editing it.");
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("Provide an object of editable fields.");
+  if (node.type === "utility" && Object.keys(patch).some((key) => key !== "title") && !isCoverageNode({ ...node, data: { ...node.data, ...patch } })) throw new Error("Only Utility's Image Coverage feature can be configured by Newt.");
   const fields = ["title", ...(myNewtFields[node.type] || [])];
   for (const [key, value] of Object.entries(patch)) {
     if (!fields.includes(key)) throw new Error(`${key} is not an editable ${node.type} input.`);

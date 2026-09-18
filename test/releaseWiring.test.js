@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "@babel/parser";
 import traverseModule from "@babel/traverse";
 import { estimateImageRunCost, estimateVideoRunCost } from "../src/generationPricing.js";
+import { isCoverageNode } from "../src/coveragePresets.js";
 
 const traverse = traverseModule.default;
 const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
@@ -33,7 +34,7 @@ test("Newt can review connected image and video prompts without a runtime error"
   const connectedText = evaluate(editor, find(trees[0], "FunctionDeclaration", (node) => node.id.name === "connectedText"), {});
   const incoming = { promptIn: [{ source: { type: "plainText", data: { text: "Keep the connected scene." } } }] };
   const describeRun = evaluate(editor, description, {
-    nodesRef: { current: [] }, edgesRef: { current: [] }, generationProvider: "fal",
+    nodesRef: { current: [] }, edgesRef: { current: [] }, generationProvider: "fal", isCoverageNode,
     buildIncomingByNode: () => ({ test: incoming }), connectedText,
     connectedImagePromptItems: () => [], imageReferenceConnectionsForModel: () => [],
     imageInstructionSourcesForModel: () => [], buildEffectiveImagePrompt: (prompt) => prompt,
@@ -43,13 +44,14 @@ test("Newt can review connected image and video prompts without a runtime error"
     uniqueAssetItems: (value) => value, connectedAssetItems: () => [], connectedCharacterReferences: () => [],
     normalizeVideoGenerateAudio: (value) => value !== false, buildEffectiveVideoPrompt: (prompt) => prompt
   });
-  for (const type of ["imageModel", "videoModel"]) {
+  for (const type of ["imageModel", "videoModel", "utility"]) {
     const result = describeRun({ id: "test", type, data: {
-      title: "Test", model: type === "imageModel" ? "Nano Banana 2" : "Seedance 2.0",
-      prompt: "Old node text", batchCount: "2", duration: "8 seconds", resolution: type === "imageModel" ? "2K" : "720p", aspectRatio: "16:9"
+      title: "Test", model: type === "videoModel" ? "Seedance 2.0" : "Nano Banana 2",
+      utilityMode: "image", utilityImageModel: "Coverage",
+      prompt: "Old node text", batchCount: "2", duration: "8 seconds", resolution: type === "videoModel" ? "720p" : "2K", aspectRatio: "16:9"
     } }, "generate");
-    assert.equal(result.prompt, "Keep the connected scene.");
-    assert.equal(result.count, 2);
+    assert.equal(result.prompt, type === "utility" ? "Nine Standard camera-angle generations" : "Keep the connected scene.");
+    assert.equal(result.count, type === "utility" ? 9 : 2);
     assert.ok(result.estimatedCost > 0);
   }
 });

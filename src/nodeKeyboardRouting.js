@@ -3,6 +3,15 @@ export function focusCanvasSelection(canvas) {
   canvas?.focus({ preventScroll: true });
 }
 
+export function editorTimelineZoomDirection(event) {
+  if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return 0;
+  const target = event.target;
+  if (target?.isContentEditable || target?.closest?.("input, textarea, select, [contenteditable], [role='textbox'], [role='searchbox'], [role='combobox'], [role='spinbutton'], [role='dialog'], [aria-modal='true']")) return 0;
+  if (target?.ownerDocument?.querySelector("[aria-modal='true']")) return 0;
+  if (event.key === "+" || event.key === "=") return 1;
+  return event.key === "-" ? -1 : 0;
+}
+
 export function canDeleteCanvasSelection(event, canvas) {
   if (!canvas || event.defaultPrevented || event.isComposing) return false;
   if (event.key !== "Backspace" && event.key !== "Delete") return false;

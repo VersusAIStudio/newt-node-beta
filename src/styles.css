@@ -933,6 +933,8 @@ textarea::placeholder {
 .pricing-settings-status:empty { display: none; }
 .pricing-settings-status { font-size: 13px; color: #e1c938; overflow-wrap: anywhere; }
 .pricing-provider { border-top: 1px solid #343434; }
+.pricing-provider-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; padding: 10px 0; font-size: 13px; }
+.pricing-provider-row > span:nth-child(2) { color: #aaa; }
 .pricing-provider summary { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; padding: 12px 0; cursor: pointer; font-size: 13px; }
 .pricing-provider summary > span:nth-child(2) { color: #aaa; }
 .pricing-current { color: #78c98a; }
@@ -943,8 +945,8 @@ textarea::placeholder {
 .pricing-change-log { font-size: 12px; color: #aaa; overflow-wrap: anywhere; }
 .pricing-change-log summary { cursor: pointer; color: #ddd; }
 @media (max-width: 600px) {
-  .pricing-provider summary { grid-template-columns: minmax(0, 1fr) auto; }
-  .pricing-provider summary > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .pricing-provider summary, .pricing-provider-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .pricing-provider summary > span:nth-child(2), .pricing-provider-row > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   .pricing-settings-meta { align-items: flex-start; flex-direction: column; gap: 6px; }
 }
 

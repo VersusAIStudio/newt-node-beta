@@ -14,7 +14,6 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     resolution: node.data.resolution,
     quality: node.data.quality,
     background: node.data.background,
-    kreaCreativity: node.data.kreaCreativity,
     imagePromptUrls: imagePromptItems.map((item) => item.url),
     imagePromptLabels: imagePromptItems.map((item) => item.label),
     ...workflowContextPayload(workflowContext),

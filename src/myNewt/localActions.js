@@ -1,4 +1,5 @@
 import { myNewtSettings, validateMyNewtPatch } from "./contract.js";
+import { isCoverageNode } from "../coveragePresets.js";
 import { myNewtBackgroundCommand } from "./localCommands.js";
 import { newtPresetDisplayName } from "./presets.js";
 import { assertMyNewtProtection, myNewtProtectionCommand } from "./workProtection.js";
@@ -6,7 +7,7 @@ import { assertMyNewtProtection, myNewtProtectionCommand } from "./workProtectio
 export const myNewtLocalWorkflows = Object.freeze([
   { id: "image", label: "Image workflow", types: ["plainText", "imageModel", "preview"], inputs: ["promptIn", "sourceIn"] },
   { id: "video", label: "Video workflow", types: ["plainText", "videoModel", "preview"], inputs: ["promptIn", "sourceIn"] },
-  { id: "coverage", label: "Coverage workflow", types: ["image", "coverage", "preview"], inputs: ["imageIn", "sourceIn"] },
+  { id: "coverage", label: "Coverage workflow", types: ["image", "utility", "preview"], inputs: ["imageIn", "sourceIn"] },
   { id: "director", label: "Director workflow", types: ["skillDirector", "videoModel", "preview"], inputs: ["directorIn", "sourceIn"] },
   { id: "storyboard", label: "Storyboard workflow", types: ["plainText", "storyboard", "preview"], inputs: ["sceneDescriptionIn", "sourceIn"] },
   { id: "image-edit", label: "Image edit workflow", types: ["imageModel", "preview"], inputs: ["sourceIn"] },
@@ -67,7 +68,7 @@ export function myNewtLocalAction(brief, snapshot = {}, settings = {}, createdId
     match = text.match(/^connect "([^"\n]+)" to "([^"\n]+)"$/i);
     if (match) {
       const source = unique(nodes, match[1], "node"), target = unique(nodes, match[2], "node");
-      if (target.type !== "preview" || !["image", "video", "imageModel", "videoModel", "coverage", "storyboard", "composer"].includes(source.type)) throw new Error("Local connections support an image, video, or image-producing node connected to a Preview. Use an AI task for other wiring.");
+      if (target.type !== "preview" || (!isCoverageNode(source) && !["image", "video", "imageModel", "videoModel", "storyboard"].includes(source.type))) throw new Error("Local connections support an image, video, or image-producing node connected to a Preview. Use an AI task for other wiring.");
       validateLocalUpdate(target, {}, snapshot, permissions, createdIds);
       const port = catalog.find((entry) => entry.type === source.type)?.ports.output[0]?.id;
       if (!port) throw new Error("The source output is unavailable.");
@@ -108,7 +109,7 @@ export function validateLocalUpdate(node, patch, snapshot, settings, createdIds 
 
 export function localWorkflowShape(id, bindings = []) {
   const workflow = myNewtLocalWorkflows.find((item) => item.id === id);
-  return id === "coverage" && bindings.length ? { ...workflow, types: ["coverage", "preview"], inputs: ["sourceIn"] } : workflow;
+  return id === "coverage" && bindings.length ? { ...workflow, types: ["utility", "preview"], inputs: ["sourceIn"] } : workflow;
 }
 
 export function buildMyNewtLocalWorkflow(id, { catalog, createData, nodeWidth, bindings = [], sourceNodes = [], copies }) {
@@ -133,6 +134,7 @@ export function buildMyNewtLocalWorkflow(id, { catalog, createData, nodeWidth, b
     const entry = catalog.find((item) => item.type === type);
     if (!entry) throw new Error("A required node type is unavailable.");
     const node = { id: `local-${index}`, type, x, y: 0, data: createData(type, entry.label), };
+    if (id === "coverage" && type === "utility") node.data = { ...createData("coverage", entry.label), utilityMode: "image", utilityImageModel: "Coverage", resultType: "image" };
     const name = node.data.title || entry.label; let suffix = 2;
     while (usedNames.has(normalized(node.data.title))) node.data.title = `${name} ${suffix++}`;
     usedNames.add(normalized(node.data.title));
@@ -200,6 +202,7 @@ export function verifyMyNewtLocalResult(action, result, snapshot, expected) {
       const workflow = localWorkflowShape(action.payload.workflowId, bindings);
       const part = created.slice(offset, offset + workflow.types.length); offset += part.length;
       if (part.length !== workflow.types.length || part.some((node, index) => node.type !== workflow.types[index])) throw new Error("The workflow is incomplete.");
+      if (workflow.id === "coverage" && !part.some(isCoverageNode)) throw new Error("The Coverage utility was not configured.");
       for (let index = 1; index < part.length; index++) {
         const source = part[index - 1], port = expected.catalog.find((entry) => entry.type === source.type)?.ports.output[0]?.id;
         if (!snapshot.edges.some((edge) => edge.from.nodeId === source.id && edge.from.port === port && edge.to.nodeId === part[index].id && edge.to.port === workflow.inputs[index - 1])) throw new Error("A workflow connection is missing.");

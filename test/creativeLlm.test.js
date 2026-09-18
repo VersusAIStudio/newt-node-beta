@@ -9,6 +9,8 @@ import {
 import { myNewtTokenCost } from "../src/myNewt/intelligence.js";
 import { storyboardDirectorExpansionInstruction } from "../src/storyboardShotExpansion.js";
 import { storyboardPlanIssues } from "../src/storyboardPlanValidation.js";
+import { assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues } from "../src/storyboardCast.js";
+import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
 import { myNewtRequestEstimate } from "../server/my-newt.js";
 import { processSmartText } from "../server/smart-text.js";
 import { llmResponseEndpoints, llmResponseModel, llmUsageCost, requestLlmResponse } from "../server/llm-responses.js";
@@ -208,8 +210,8 @@ test("Smart Text sends images and the user's brief together through Fal, Atlas a
 test("Storyboard planning passes its verified Astra contract and rejects collapsed Director moves", async () => {
   const source = server.slice(server.indexOf("async function generateStoryboardPlanWithOpenAi("), server.indexOf("async function recordStoryboardLlmUsage("));
   const shotList = "CUT 1 - A child plays soccer, then the camera rises to a bird's eye view of the entire field, then ascends above the clouds.";
-  const plan = { sceneTitle: "Soccer", analysis: "A continuous ascent.", frames: [1, 2, 3].map((number) => ({ number, notes: "CUT 1 - keyframe", prompt: `Visual state ${number}` })) };
-  const deps = { storyboardDirectorExpansionInstruction, storyboardPlanIssues, storyboardReasoningSkill,
+  const plan = { sceneTitle: "Soccer", analysis: "A continuous ascent.", frames: [1, 2, 3].map((number) => ({ number, notes: "CUT 1 - keyframe", prompt: `Visual state ${number}`, cast: [] })) };
+  const deps = { storyboardDirectorExpansionInstruction, storyboardPlanIssues, storyboardReasoningSkill, assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues, storyboardPromptPolicy,
     storyboardFalModel: creativeFalModel, storyboardOpenAiModel: creativeOpenAiModel,
     runTextLlm: async (body) => {
       assert.equal(body.openAiModel, creativeOpenAiModel);

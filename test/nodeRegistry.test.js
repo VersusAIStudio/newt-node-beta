@@ -38,10 +38,10 @@ test("new and saved Newt nodes use the new default without changing custom title
   }
 });
 
-test("Coverage appears directly beneath Storyboard in the node sidebar", () => {
-  const storyboardIndex = nodeTypeDefinitions.findIndex(({ type }) => type === "storyboard");
-  assert.notEqual(storyboardIndex, -1);
-  assert.equal(nodeTypeDefinitions[storyboardIndex + 1]?.type, "coverage");
+test("Coverage lives in Utility Image and Composer is removed from all node menus", () => {
+  assert.equal(nodeTypeDefinitions.some(({ type }) => type === "coverage" || type === "composer"), false);
+  assert.equal(utilityImageModelNames.coverage, "Coverage");
+  assert.match(utilityModelDescriptions.Coverage, /nine camera angles/);
 });
 
 test("the Film Director node is presented as Director", () => {

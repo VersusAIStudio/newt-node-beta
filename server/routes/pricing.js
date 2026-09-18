@@ -1,4 +1,4 @@
-export function registerPricingRoutes(app, pricing) {
+export function registerPricingRoutes(app, pricing, quotes) {
   app.get("/api/pricing", async (_req, res) => {
     await pricing.ready;
     res.setHeader("Cache-Control", "no-store");
@@ -11,7 +11,11 @@ export function registerPricingRoutes(app, pricing) {
     const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
     if (!allowed || !localHost || !loopback || req.get("X-Newt-Local") !== "1") return res.status(403).json({ error: "Pricing changes require the local NewtNode app." });
     try {
-      if (req.params.action === "refresh") { await pricing.refresh(); return res.json(pricing.status()); }
+      if (req.params.action === "refresh") { pricing.refresh().catch(() => {}); return res.status(202).json(pricing.status()); }
+      if (req.params.action === "quote" && quotes) {
+        res.setHeader("Cache-Control", "no-store");
+        return res.json(await quotes.quote(req.body));
+      }
       if (req.params.action === "settings") return res.json(await pricing.setEnabled(req.body.enabled));
       res.status(404).json({ error: "Unknown pricing action." });
     } catch (error) { res.status(400).json({ error: error.message || "Pricing update failed." }); }

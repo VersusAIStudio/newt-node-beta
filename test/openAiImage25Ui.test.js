@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { imageModelOptions } from "../src/modelOptions.js";
-import { openAiImage25Models } from "../src/openAiImage25.js";
+import { imageModelOptions, coverageModelOptions } from "../src/modelOptions.js";
+import { openAiImage25Models, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions } from "../src/openAiImage25.js";
 
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const compiled = buildSync({ stdin: { contents: `${source}\nexport { NodeBody, normalizeImageModelData, imageModelSelectionPatch, createDefaultNodeData, normalizeCurrentNode, storyboardAspectRatioForNode };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" }, bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic", define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" } });
@@ -33,8 +33,10 @@ test("2.5 image controls display new quality levels, provider sizes and variable
     assert.match(fal, /Run Image \(Variable cost\)/);
     const krea = renderModel(model, "krea");
     assert.match(krea, />Maximum</);
-    assert.doesNotMatch(krea, />4K<|>2K<|>16:9<|>21:9</);
-    assert.match(krea, />3:2</);
+    for (const option of [...openAiImage25KreaAspectRatios, ...openAiImage25KreaResolutionOptions]) {
+      assert.ok(krea.includes(`>${option}<`), `Krea ${model} includes ${option}`);
+    }
+    assert.doesNotMatch(krea, />21:9</);
     assert.equal(krea.includes(">Transparent<"), model === openAiImage25Models.flare);
   }
   const legacy = renderModel("OpenAI Image 2");
@@ -60,6 +62,31 @@ test("new Storyboard defaults to Flare while Character keeps Nano Banana Pro and
       assert.equal(data.resolution, "1K");
       assert.equal(data.storyboardAutoQc, true);
     } else assert.doesNotMatch(html, /Flare/);
+  }
+});
+
+test("retired image choices reopen safely without losing media or reviving controls", () => {
+  for (const model of ["Krea 2 Large", "REVE 2.1"]) {
+    const saved = { model, prompt: "Saved creative direction", aspectRatio: "4:1", resolution: "4K",
+      kreaCreativity: "raw", resultUrl: "/outputs/old.png", resultItems: [{ url: "/outputs/old.png" }] };
+    const restored = normalizeCurrentNode({ id: "legacy", type: "imageModel", data: saved }).data;
+    assert.equal(restored.model, "Nano Banana Pro");
+    assert.equal(restored.aspectRatio, "16:9");
+    assert.equal(restored.resolution, "4K");
+    for (const field of ["prompt", "resultUrl", "resultItems"]) assert.deepEqual(restored[field], saved[field]);
+    assert.equal("kreaCreativity" in restored, false);
+    const html = renderToStaticMarkup(React.createElement(NodeBody, {
+      node: { id: "legacy", type: "imageModel", data: restored }, incoming: {}, incomingByNode: {},
+      connectedPortKeys: new Set(), imageModelOptions, generationProvider: "fal", onUpdate: () => {}, onRun: () => {}
+    }));
+    assert.doesNotMatch(html, /Krea 2 Large|REVE 2.1|Creativity/);
+    assert.match(html, /Mood Board/);
+    assert.match(html, /Character/);
+    for (const type of ["explore", "coverage", "utility"]) {
+      const data = normalizeCurrentNode({ id: type, type, data: { ...saved, utilityMode: "image", utilityImageModel: "Coverage" } }).data;
+      assert.ok((type === "explore" ? imageModelOptions : coverageModelOptions).includes(data.model));
+      assert.equal(data.resultUrl, saved.resultUrl);
+    }
   }
 });
 
@@ -126,7 +153,7 @@ test("saved 2.5 selections retain maximum quality, alpha and prior full-resoluti
     for (const key of Object.keys(data)) assert.deepEqual(restored[key], data[key]);
     const krea = imageModelSelectionPatch(restored, model, "krea");
     assert.equal(krea.quality, "max");
-    assert.equal(krea.resolution, "1K");
-    assert.equal(krea.aspectRatio, "3:2");
+    assert.equal(krea.resolution, "4K");
+    assert.equal(krea.aspectRatio, "2:1");
   }
 });

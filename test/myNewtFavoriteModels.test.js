@@ -4,6 +4,7 @@ import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as models from "../src/modelOptions.js";
+import { isCoverageNode } from "../src/coveragePresets.js";
 import { isSeedance25Model } from "../src/seedance25.js";
 import { isMiniMaxH3Model } from "../src/minimaxH3.js";
 import { myNewtSettings, myNewtDefaults, myNewtSnapshot } from "../src/myNewt/contract.js";
@@ -17,7 +18,7 @@ const favorites = { favoriteImageModel: "Nano Banana Pro", favoriteVideoModel: "
 const catalog = [
   { type: "imageModel", options: { model: models.imageModelOptions }, ports: { input: [{ id: "promptIn" }], output: [{ id: "imageOut" }] } },
   { type: "videoModel", options: { model: models.videoModelOptions }, ports: { input: [{ id: "promptIn" }, { id: "directorIn" }], output: [{ id: "videoOut" }] } },
-  { type: "coverage", options: { model: ["OpenAI Image 2", "Nano Banana Pro", "REVE 2.1"] } },
+  { type: "coverage", options: { model: ["OpenAI Image 2", "Nano Banana Pro", "OpenAI Image 2.5 Flare"] } },
   { type: "character", options: { characterSheetModel: ["Nano Banana 2", "Nano Banana Pro", "OpenAI Image 2"] } },
   { type: "skillDirector", options: { skillVideoModel: models.videoModelOptions }, ports: { input: [], output: [{ id: "directorOut" }] } },
   { type: "plainText", ports: { input: [], output: [{ id: "promptOut" }] } },
@@ -44,8 +45,8 @@ test("favorites apply only to supported fresh node choices and explicit models w
     assert.deepEqual(myNewtFavoriteCreationPatch(type, favorites, catalog, { [field]: "Explicit model" }), {});
   }
   for (const type of ["storyboard", "text", "utility", "composer", "myNewt", "preview"]) assert.deepEqual(myNewtFavoriteCreationPatch(type, favorites, catalog), {});
-  assert.deepEqual(myNewtFavoriteCreationPatch("character", { favoriteImageModel: "REVE 2.1" }, catalog), {});
-  assert.deepEqual(myNewtFavoriteCreationPatch("coverage", { favoriteImageModel: "Krea 2 Large" }, catalog), {});
+  assert.deepEqual(myNewtFavoriteCreationPatch("character", { favoriteImageModel: "OpenAI Image 2.5 Flare" }, catalog), {});
+  assert.deepEqual(myNewtFavoriteCreationPatch("coverage", { favoriteImageModel: "OpenAI Image 2.5 Sunburst" }, catalog), {});
   assert.deepEqual(myNewtFavoriteCreationPatch("imageModel", {}, catalog), {});
 });
 
@@ -70,7 +71,7 @@ function editorFunctionSource(name) {
 function createDataFactory(settings = favorites) {
   const start = editor.indexOf("  const newtCreationData ="), end = editor.indexOf("  const myNewtTaskController =", start);
   assert.ok(start >= 0 && end > start);
-  const deps = { ...models, isSeedance25Model, isMiniMaxH3Model, myNewtFavoriteCreationPatch,
+  const deps = { ...models, isCoverageNode, isSeedance25Model, isMiniMaxH3Model, myNewtFavoriteCreationPatch,
     nodesRef: { current: [{ type: "myNewt", data: settings }] }, myNewtCatalog: catalog, generationProvider: "fal",
     validateMyNewtOptions: (type, patch) => { const choices = catalog.find((entry) => entry.type === type)?.options || {}; for (const [key, value] of Object.entries(patch)) if (choices[key]) assert.ok(choices[key].includes(value)); },
     imageModelSelectionPatch: (data, model) => ({ model, resolution: data.resolution || "2K", quality: data.quality || "high" }),
@@ -103,10 +104,10 @@ test("fresh free workflows use favorites without modifying existing nodes, prese
     assert.equal(modelNode.data.model, id === "image" ? favorites.favoriteImageModel : favorites.favoriteVideoModel);
     if (id === "director") assert.equal(graph.nodes[0].data.skillVideoModel, favorites.favoriteVideoModel);
   }
-  const graph = { nodes: [{ id: "image", type: "imageModel", x: 0, y: 0, data: { title: "Saved image", model: "REVE 2.1", resolution: "2K" } }], edges: [], groups: [] };
+  const graph = { nodes: [{ id: "image", type: "imageModel", x: 0, y: 0, data: { title: "Saved image", model: "OpenAI Image 2.5 Flare", resolution: "2K" } }], edges: [], groups: [] };
   const original = structuredClone(graph);
-  const copy = instantiateNewtPreset(graph, { x: 10, y: 10 }); assert.equal(copy.nodes[0].data.model, "REVE 2.1");
-  const duplicate = buildMyNewtDuplicateGraph(graph, ["image"], 1); assert.equal(duplicate.nodes[0].data.model, "REVE 2.1");
+  const copy = instantiateNewtPreset(graph, { x: 10, y: 10 }); assert.equal(copy.nodes[0].data.model, "OpenAI Image 2.5 Flare");
+  const duplicate = buildMyNewtDuplicateGraph(graph, ["image"], 1); assert.equal(duplicate.nodes[0].data.model, "OpenAI Image 2.5 Flare");
   assert.deepEqual(graph, original);
   const action = myNewtLocalAction('Set "Saved image" model to OpenAI Image 2', { ...graph, catalog }, { ...favorites, allowExisting: true });
   assert.equal(action.route, "local"); assert.equal(action.action.payload.patch.model, "OpenAI Image 2");
@@ -136,7 +137,7 @@ test("the planner receives saved favorites and the strict existing-model/preset 
   assert.match(request.instructions, /including presets inserted during this task/);
   const stored = JSON.parse(await readFile(path.join(directory, `${started.id}.json`), "utf8"));
   assert.equal(stored.settings.favoriteVideoModel, favorites.favoriteVideoModel);
-  await service.control(started.id, { ...owner, action: "settings", settings: { ...stored.settings, favoriteImageModel: "REVE 2.1" } });
-  assert.equal(service.jobs.get(started.id).settings.favoriteImageModel, "REVE 2.1");
+  await service.control(started.id, { ...owner, action: "settings", settings: { ...stored.settings, favoriteImageModel: "OpenAI Image 2.5 Flare" } });
+  assert.equal(service.jobs.get(started.id).settings.favoriteImageModel, "OpenAI Image 2.5 Flare");
   assert.deepEqual(service.jobs.get(started.id).snapshot, graph);
 });

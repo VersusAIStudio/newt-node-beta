@@ -9,8 +9,7 @@ export const kreaEndpoints = Object.freeze({
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
     "OpenAI Image 2.5 Sunburst": "/generate/image/openai/gpt-image-2.5-sunburst",
-    "OpenAI Image 2.5 Flare": "/generate/image/openai/gpt-image-2.5-flare",
-    "Krea 2 Large": "/generate/image/krea/krea-2/large"
+    "OpenAI Image 2.5 Flare": "/generate/image/openai/gpt-image-2.5-flare"
   }),
   video: Object.freeze({
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
@@ -29,8 +28,7 @@ export const kreaEndpoints = Object.freeze({
 
 const kreaImagePrices = Object.freeze({
   "Nano Banana 2": Object.freeze({ "1K": 0.08, "2K": 0.12, "4K": 0.16 }),
-  "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
-  "Krea 2 Large": Object.freeze({ "1K": 0.06 })
+  "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 })
 });
 
 export function resolveFalKreaProvider({ falKey, kreaKey } = {}) {
@@ -115,9 +113,9 @@ export function buildKreaImageInput({
   aspectRatio = "16:9",
   resolution = "2K",
   quality = "high",
-  background = "auto",
-  creativity = "raw"
+  background = "auto"
 } = {}) {
+  if (!supportsKreaModel("image", modelName)) throw Object.assign(new Error("Unsupported Krea image model. Choose a supported image model."), { status: 400 });
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
   const normalizedAspectRatio = normalizeKreaImageAspectRatio(modelName, aspectRatio);
   const refs = referenceUrls.filter(Boolean);
@@ -126,7 +124,7 @@ export function buildKreaImageInput({
   if (isOpenAiImage25Model(modelName)) {
     validateOpenAiImage25KreaRequest({ model: modelName, resolution, aspectRatio, referenceCount: refs.length, background });
     return compact({ ...input, quality: normalizeOpenAiImage25Quality(quality), image_urls: refs,
-      aspect_ratio: aspectRatio, resolution: "1K",
+      aspect_ratio: aspectRatio, resolution: normalizedResolution,
       ...(openAiImage25Variant(modelName) === "flare" ? { background: normalizeOpenAiImage25Background(background) } : {}) });
   }
 
@@ -140,58 +138,31 @@ export function buildKreaImageInput({
     });
   }
 
-  if (modelName === "Nano Banana 2" || modelName === "Nano Banana Pro") {
-    return compact({
-      ...input,
-      image_urls: refs.slice(0, 14),
-      aspect_ratio: normalizedAspectRatio,
-      resolution: normalizedResolution
-    });
-  }
-
-  if (modelName === "Krea 2 Large") {
-    return compact({
-      ...input,
-      image_style_references: refs.slice(0, 10).map((url) => ({ url, strength: 0.7 })),
-      aspect_ratio: normalizedAspectRatio,
-      resolution: "1K",
-      creativity: normalizeChoice(creativity, ["raw", "low", "medium", "high"], "raw")
-    });
-  }
-
   return compact({
     ...input,
-    image_urls: refs,
+    image_urls: refs.slice(0, 14),
     aspect_ratio: normalizedAspectRatio,
     resolution: normalizedResolution
   });
 }
 
 export function normalizeKreaImageResolution(modelName, value) {
-  if (isOpenAiImage25Model(modelName)) return "1K";
   const requested = String(value || "2K").toUpperCase();
-  if (modelName === "Krea 2 Large") return "1K";
   return normalizeChoice(requested, ["1K", "2K", "4K"], "2K");
 }
 
 export function normalizeKreaImageAspectRatio(modelName, value) {
   const ratio = String(value || "16:9").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "16:9";
   const options =
-    modelName === "Krea 2 Large"
-        ? ["1:1", "4:3", "3:2", "16:9", "2.35:1", "4:5", "2:3", "9:16"]
-        : modelName === "OpenAI Image 2"
-          ? ["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"]
-          : ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
+    modelName === "OpenAI Image 2"
+      ? ["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"]
+      : ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
   return closestRatio(ratio, options);
 }
 
-export function estimateKreaImageCost({ modelName, resolution, referenceCount = 0 } = {}) {
+export function estimateKreaImageCost({ modelName, resolution } = {}) {
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
-  let amountUsd = kreaImagePrices[modelName]?.[normalizedResolution] ?? null;
-
-  if (modelName === "Krea 2 Large" && referenceCount > 0) {
-    amountUsd = 0.065;
-  }
+  const amountUsd = kreaImagePrices[modelName]?.[normalizedResolution] ?? null;
 
   const cost = {
     amountUsd: amountUsd == null ? null : roundCurrency(amountUsd),
@@ -205,10 +176,7 @@ export function estimateKreaImageCost({ modelName, resolution, referenceCount = 
       : `${modelName} Krea API fixed-price estimate`,
     pricingSource: "krea-api-docs-2026-07-30"
   };
-  const dimensions = modelName === "Krea 2 Large"
-    ? { k2BillingTier: referenceCount > 0 ? "srefs" : "text-to-image" }
-    : { resolution: normalizedResolution };
-  return applyPricingQuote(cost, "krea", kreaEndpointForModel("image", modelName), dimensions);
+  return applyPricingQuote(cost, "krea", kreaEndpointForModel("image", modelName), { resolution: normalizedResolution });
 }
 
 export function estimateKreaKlingCost({ durationSeconds, generateAudio, mode }) {

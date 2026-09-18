@@ -14,7 +14,7 @@
 .editor-node-body .editor-tool:hover:not(:disabled), .editor-monitor button:hover { background: #353631; color: #fff; }
 .editor-node-body .editor-tool.active { color: #e3ce2b; background: #343321; }
 .editor-readouts { display: flex; gap: 12px; }
-.editor-readouts label { display: flex; flex-direction: column; gap: 4px; color: #92948d; font-size: 10px; }
+.editor-readouts label, .editor-timecode { display: flex; flex-direction: column; gap: 4px; color: #92948d; font-size: 10px; }
 .editor-readouts input, .editor-readouts output { display: block; height: 31px; background: #111310; border: 1px solid #3b3d36; border-radius: 4px; font: 14px ui-monospace, SFMono-Regular, monospace; color: #e5e6dc; padding: 6px 9px; font-variant-numeric: tabular-nums; }
 .editor-readouts input { width: 84px; }
 .editor-readouts output { width: 131px; }

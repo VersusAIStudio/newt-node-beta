@@ -14,7 +14,7 @@ const owner = { projectId: "local-test", nodeId: "newt" };
 const catalog = [
   ["plainText", "Text", "promptOut", []], ["imageModel", "Image Model", "imageOut", ["promptIn", "imagePromptIn", "characterIn", "transferIn"]],
   ["videoModel", "Video Model", "videoOut", ["promptIn", "directorIn"]], ["preview", "Preview", "", ["sourceIn"]],
-  ["image", "Image", "imageOut", []], ["coverage", "Coverage", "imageOut", ["imageIn"]],
+  ["image", "Image", "imageOut", []], ["utility", "Utility", "utilityOut", ["imageIn"]],
   ["skillDirector", "Director", "directorOut", ["characterIn", "locationIn", "imageIn", "styleIn", "musicIn"]], ["storyboard", "Storyboard", "imageOut", ["sceneDescriptionIn", "directorIn", "characterIn", "sceneReferenceIn", "propsIn", "transferIn"]],
   ["character", "Character", "characterOut", []], ["transfer", "Mood Board", "transferOut", []], ["audio", "Audio", "audioOut", []]
 ].map(([type, label, output, input]) => ({ type, label, ports: { output: output ? [{ id: output, color: "yellow" }] : [], input: input.map((id) => ({ id })) } }));
@@ -138,7 +138,7 @@ test("each-image workflows and previews wire all named sources and verify the re
     assert.equal(new Set(completed.nodes.map((node) => node.data?.title).filter(Boolean)).size, completed.nodes.filter((node) => node.data?.title).length);
     assert.equal(verifyMyNewtLocalResult(compiled.action, result, completed, state).length, built.nodes.length);
     assert.throws(() => verifyMyNewtLocalResult(compiled.action, result, { ...completed, edges: completed.edges.filter((edge) => edge !== built.externalEdges[0]) }, state), /reference was not connected/);
-    if (p.copies) { assert.equal(built.nodes.filter((node) => node.type === "coverage").length, 2); assert.equal(built.externalEdges.length, 2); }
+    if (p.copies) { assert.equal(built.nodes.filter((node) => node.type === "utility" && node.data.utilityImageModel === "Coverage").length, 2); assert.equal(built.externalEdges.length, 2); }
     if (p.workflowId === "music-video") { assert.equal(built.nodes[0].data.skillApproach, "music-video"); assert.equal(built.nodes[0].data.skillDirectorAudioMode, "full"); }
   }
 });

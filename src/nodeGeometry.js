@@ -49,6 +49,7 @@ export function resizePlainTextNode(startSize = {}, delta = {}) {
 
 export function estimatedNodeWidth(type) {
   if (type === "editor") return 1100;
+  if (type === "explore") return 650;
   if (type === "myNewt") return 410;
   if (type === "frameIt") return 980;
   if (type === "autoAspect") return 390;
@@ -64,6 +65,7 @@ export function estimatedNodeWidth(type) {
 
 export function estimatedNodeHeight(type) {
   if (type === "editor") return 470;
+  if (type === "explore") return 680;
   if (type === "myNewt") return 650;
   if (type === "frameIt") return 700;
   if (type === "character") return 520;

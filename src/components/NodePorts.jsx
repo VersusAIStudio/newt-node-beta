@@ -44,6 +44,17 @@ export function OutputPortRow({ node, port, onConnectStart, onDisconnectInput, c
   );
 }
 
+export function CollapsedInputPorts({ node, ports, onExpand, connectedPortKeys }) {
+  const connected = ports.some(port => connectedPortKeys.has(`${node.id}:${port.id}`));
+  return <span className="collapsed-input-ports">
+    {/* Keep every typed edge anchored without making the aggregate an ambiguous drop target. */}
+    {ports.map(port => <span key={port.id} aria-hidden="true" data-port-key={`${node.id}:${port.id}`} />)}
+    <button className={`inline-port input ${connected ? "connected" : ""}`} style={{ "--port-color": "#929292" }}
+      aria-label="Expand references" title="Expand references to connect or disconnect assets"
+      onPointerDown={event => event.stopPropagation()} onClick={onExpand} />
+  </span>;
+}
+
 export function NodeRow({ label, children, inputPort, node, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   return (
     <div className={`node-row ${inputPort ? "has-port" : ""} ${inputPort?.disabled ? "disabled" : ""}`}>

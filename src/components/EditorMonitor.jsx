@@ -4,12 +4,12 @@ import { editorPlayback } from "../editorPlayback.js";
 import { editorTimecode } from "../editorTimeline.js";
 import "../editorTimeline.css";
 
-export function EditorMonitor({ nodeId, timeline, controls = true }) {
+export function EditorMonitor({ nodeId, timeline, controls = true, allowNodeDrag = false }) {
   const player = React.useMemo(() => editorPlayback(nodeId), [nodeId]);
   const state = React.useSyncExternalStore(player.subscribe, player.getSnapshot, player.getSnapshot);
   const canvasRef = React.useRef(null);
   React.useEffect(() => player.mirror(canvasRef.current), [player]);
-  return <div className="editor-monitor" onPointerDown={event => event.stopPropagation()}>
+  return <div className="editor-monitor" onPointerDown={event => { if (!allowNodeDrag) event.stopPropagation(); }}>
     <canvas ref={canvasRef} width={timeline.width} height={timeline.height} style={{ aspectRatio: `${timeline.width} / ${timeline.height}` }} aria-label="Editor sequence preview" />
     {state.buffering && <span className="editor-monitor-state" role="status">Buffering</span>}
     {state.error && <span className="editor-monitor-error" role="alert">{state.error}</span>}

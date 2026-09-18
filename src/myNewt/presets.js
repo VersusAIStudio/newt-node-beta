@@ -1,4 +1,5 @@
 import { nodeTypeDefinitions } from "../nodeRegistry.js";
+import { migrateRetiredGraph } from "../retiredNodes.js";
 import { resetCopiedNodeRuntime, remapImportedGraph, createNodeId } from "../workflowState.js";
 import { estimatedNodeRect, groupToRect } from "../nodeGeometry.js";
 import { cleanReferenceTag } from "../referenceTags.js";
@@ -19,6 +20,7 @@ function presetData(value) {
 }
 
 export function buildNewtPresetGraph(graph = {}, selectedIds = (graph.nodes || []).map((node) => node.id), measured = {}) {
+  graph = migrateRetiredGraph(graph);
   const selected = new Set(selectedIds), ids = new Set();
   const nodes = (graph.nodes || []).filter((node) => {
     if (typeof node.id !== "string" || !node.id || !selected.has(node.id) || node.type === "myNewt" || !types.has(node.type) || ids.has(node.id)) return false;

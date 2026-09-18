@@ -165,3 +165,11 @@ export function coveragePreviewItems(items = []) {
     .filter((item) => item?.url)
     .map((item) => ({ ...item, sourceUrl: item.url }));
 }
+
+export function isUtilityCoverageModel(model) {
+  return String(model || "").trim().toLowerCase() === "coverage";
+}
+
+export function isCoverageNode(node) {
+  return node?.type === "coverage" || (node?.type === "utility" && node.data?.utilityMode === "image" && isUtilityCoverageModel(node.data?.utilityImageModel));
+}

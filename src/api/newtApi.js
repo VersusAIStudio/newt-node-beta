@@ -16,13 +16,13 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
   if (scoped) return scoped;
   const requestUrl = localApiFetchUrl(path);
   const videoRequest = isVideoGenerationRequest(path, options);
-  if (videoRequest || isImageModelRequest(path, options)) {
+  if (videoRequest || isImageModelRequest(path, options) || path === "/api/node/explore-plan") {
     // Never replay a paid media POST after an uncertain response, including via Newt.
     try {
       const response = await fetch(requestUrl, options);
       return { response, data: await readJsonResponse(response, label) };
     } catch {
-      throw new Error(`${label}: the connection or response was interrupted. The ${videoRequest ? "video" : "image"} may still be generating. Check History and the provider before running again; NewtNode did not resubmit or cancel the job.`);
+      throw new Error(`${label}: the connection or response was interrupted. The ${path === "/api/node/explore-plan" ? "plan" : videoRequest ? "video" : "image"} may still be generating. Check History and the provider before running again; NewtNode did not resubmit or cancel the job.`);
     }
   }
   let response;
@@ -303,6 +303,7 @@ export const generationApi = {
 };
 
 export const nodeApi = {
+  planExplore: body => postJson("/api/node/explore-plan", body, "Explore planning"),
   async editImage(form) {
     // Never replay a potentially billed edit through the localhost fallback.
     let response;
@@ -432,6 +433,13 @@ export const settingsApi = {
 
 export const pricingApi = {
   load() { return getJson("/api/pricing", "Could not load pricing status."); },
+  async quote(settings) {
+    const { response, data } = await fetchJsonApi("/api/pricing/quote", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" },
+      body: JSON.stringify(settings), signal: AbortSignal.timeout(12000)
+    }, "Price estimate");
+    return ensureOk(response, data, "Price estimate unavailable.");
+  },
   async refresh() {
     const { response, data } = await fetchJsonApi("/api/pricing/refresh", {
       method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: "{}"

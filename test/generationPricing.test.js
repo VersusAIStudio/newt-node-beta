@@ -77,5 +77,9 @@ test("provider selection follows the enabled configured key priority", () => {
     kreaApiKeyConfigured: true,
     providerPreferences: { fal: false, krea: true }
   }), "krea");
-  assert.equal(formatPricedRunLabel("Run Video", 4.22), "Run Video ($4.22)");
+  assert.equal(formatPricedRunLabel("Run Video", 4.22), "Run Video (Est. $4.22)");
+});
+
+test("Krea token-priced images do not inherit a different provider's image tariff", () => {
+  assert.equal(estimateImageRunCost({ model: "OpenAI Image 2", provider: "krea", quality: "high", batchCount: 4 }), null);
 });

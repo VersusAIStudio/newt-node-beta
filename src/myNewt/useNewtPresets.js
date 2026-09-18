@@ -37,16 +37,17 @@ export function useNewtPresets(adapter) {
     setSelectedId(preset.id); setDraft(null);
     live.current.onStatus(`Newt Preset saved: ${preset.name}`);
   });
-  const insert = () => perform(async () => {
-    if (!selectedId) return;
+  const insert = (id = selectedId, replacements = bindings) => perform(async () => {
+    if (!id) return;
     const projectId = live.current.projectId;
-    const preset = await newtPresetsApi.get(selectedId);
+    const preset = await newtPresetsApi.get(id);
     if (projectId !== live.current.projectId) throw new Error("Project changed. Select the preset again in this project.");
-    await live.current.insert(preset.graph, bindings);
+    await live.current.insert(preset.graph, replacements);
     live.current.onStatus(`Inserted Newt Preset: ${preset.name}`);
   });
-  const remove = () => {
-    const selected = items.find((item) => item.id === selectedId);
+  const remove = (id = selectedId) => {
+    if (operation.current) return;
+    const selected = items.find((item) => item.id === id);
     if (selected?.isSystem !== false) return;
     if (!selected || !window.confirm(`Delete Newt Preset "${selected.name}"? Nodes already placed in projects will be kept.`)) return;
     return perform(async () => {

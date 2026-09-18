@@ -18,7 +18,7 @@ const kreaSeedanceRates = Object.freeze({
   seedance25: Object.freeze({
     "480p": Object.freeze({ withVideoReference: 0.0645, withoutVideoReference: 0.1078 }),
     "720p": Object.freeze({ withVideoReference: 0.1452, withoutVideoReference: 0.2427 }),
-    "1080p": Object.freeze({ withVideoReference: 0.2572, withoutVideoReference: 0.4299 })
+    "1080p": Object.freeze({ withVideoReference: 0.3572, withoutVideoReference: 0.5971 })
   })
 });
 
@@ -50,7 +50,7 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", durationS
     durationSeconds: seconds,
     pricingBasis: `Krea ${modelName === "Seedance 2.5" ? "Seedance 2.5" : "Seedance 2 standard"} per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
     pricingSource: modelName === "Seedance 2.5"
-      ? "krea-api-pricing-2026-08-29"
+      ? "krea-api-pricing-2026-09-18"
       : "krea-api-pricing-2026-07-12"
   };
   return applyPricingQuote(cost, "krea", kreaSeedanceEndpoint(modelName), {

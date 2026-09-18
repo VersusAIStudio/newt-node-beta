@@ -288,6 +288,19 @@
   background: rgba(221, 198, 49, 0.12);
 }
 
+.preset-workflow-picker { position: relative; display: grid; gap: 6px; min-width: 0; }
+.preset-workflow-menu { top: 34px; max-height: min(320px, 50dvh); border-radius: 8px; }
+.preset-workflow-menu[hidden] { display: none; }
+.preset-workflow-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px; }
+.node-toolbar .preset-workflow-load { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 7px 6px; background: transparent; }
+.node-toolbar .preset-workflow-load span { white-space: normal; overflow-wrap: anywhere; }
+.node-toolbar .preset-workflow-delete { grid-template-columns: 1fr; place-items: center; width: 26px; height: 30px; padding: 0; color: #aaa; background: transparent; }
+.node-toolbar .preset-workflow-delete:hover { color: #ffa38b; background: rgba(236, 91, 91, 0.14); }
+.preset-workflow-picker button:focus-visible { outline: 2px solid #ddc631; outline-offset: -2px; }
+.preset-workflow-error-row { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 6px; align-items: start; }
+.node-toolbar .preset-workflow-error-row button { grid-template-columns: 1fr; place-items: center; width: 30px; height: 30px; padding: 0; }
+.preset-workflow-error { margin: 0; color: #ffa38b; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+
 .project-output-drawer {
   position: relative;
   display: grid;
@@ -1341,8 +1354,6 @@
 .my-newt-history { display: grid; gap: 5px; font-size: 11px; color: #aaa; }
 .my-newt-history select, .my-newt-settings select { min-width: 0; max-width: 100%; background: #171717; color: #eee; border: 1px solid #414141; border-radius: 4px; padding: 7px; font: inherit; }
 .my-newt-settings select { margin-left: auto; }
-.my-newt-preset-binding { display: grid; gap: 5px; min-width: 0; }
-.my-newt-preset-binding select { width: 100%; min-width: 0; padding: 7px; background: #171717; color: #eee; border: 1px solid #414141; border-radius: 4px; }
 .newt-preset-slots { border: 0; margin: 12px 0; padding: 0; max-height: 260px; overflow-y: auto; }
 .newt-preset-slots legend { margin-bottom: 8px; }
 .newt-preset-slots > div { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -1396,9 +1407,6 @@
 .my-newt-settings label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .my-newt-settings input[type=checkbox] { width: 15px; height: 15px; accent-color: #ddc631; margin: 0; }
 .my-newt-settings input[type=number] { width: 88px; height: 30px; box-sizing: border-box; margin-left: auto; padding: 5px 7px; background: #171717; color: #eee; border: 1px solid #3b3b3b; border-radius: 4px; font: inherit; }
-.my-newt-presets { min-width: 0; display: grid; gap: 6px; font-size: 12px; }
-.my-newt-preset-controls { display: flex; gap: 6px; min-width: 0; }
-.my-newt-preset-controls select { flex: 1; min-width: 0; height: 36px; padding: 5px 8px; border: 1px solid #3b3b3b; border-radius: 4px; background: #171717; color: #eee; font: inherit; text-overflow: ellipsis; }
 .my-newt-settings label.my-newt-intelligence { display: grid; gap: 8px; }
 .my-newt-intelligence span { display: flex; justify-content: space-between; gap: 10px; }
 .my-newt-intelligence output { color: #ddc631; }
@@ -1569,6 +1577,14 @@
 
 .utility-specialized-model select {
   width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  color: #f6f1e8;
+  background: rgba(0, 0, 0, 0.34);
+  font: inherit;
 }
 
 .frame-it-node-body {
